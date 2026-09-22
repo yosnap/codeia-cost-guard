@@ -1,0 +1,321 @@
+/* CostBar — popover 360–420 px · HTML+CSS puro
+   Tokens derivados de #ae00ff (violeta) y #ff008c (rojo). Ver brand-spec.md */
+
+:root {
+  /* neutros violeta-gris */
+  --bg: oklch(1 0 0);
+  --surface: oklch(0.977 0.004 308);
+  --surface-2: oklch(0.957 0.007 308);
+  --fg: oklch(0.235 0.012 308);
+  --muted: oklch(0.52 0.014 308);
+  --border: oklch(0.912 0.006 308);
+
+  /* acentos de marca */
+  --violet: #ae00ff;
+  --red: #ff008c;
+
+  /* escala de cifras: el color codifica la magnitud */
+  --v-k: oklch(0.54 0.16 308);
+  --v-m: #ae00ff;
+  --v-b: oklch(0.55 0.24 359);
+
+  /* estados */
+  --hover: var(--surface);
+  --shadow: 0 24px 48px -12px oklch(0.235 0.012 308 / 0.22),
+    0 8px 20px -8px oklch(0.235 0.012 308 / 0.14);
+  --rail: var(--surface);
+}
+
+.theme-dark {
+  --bg: oklch(0.163 0.009 308);
+  --surface: oklch(0.205 0.011 308);
+  --surface-2: oklch(0.248 0.013 308);
+  --fg: oklch(0.94 0.005 308);
+  --muted: oklch(0.67 0.012 308);
+  --border: oklch(0.292 0.011 308);
+  --v-k: oklch(0.78 0.12 308);
+  --v-m: oklch(0.70 0.28 308);
+  --v-b: oklch(0.72 0.24 359);
+  --hover: var(--surface-2);
+  --shadow: 0 24px 56px -12px oklch(0 0 0 / 0.6),
+    0 8px 24px -8px oklch(0 0 0 / 0.4);
+  --rail: oklch(0.292 0.011 308);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: oklch(0.93 0.008 308);
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: var(--fg);
+}
+
+.stage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 48px 24px 72px;
+}
+
+.stage-note {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: oklch(0.52 0.014 308);
+  margin: 0;
+}
+
+/* ---------- popover ---------- */
+
+.popover {
+  width: 384px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: clip;
+}
+
+.sec { border-top: 1px solid var(--border); }
+.sec:first-child { border-top: 0; }
+
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px 4px;
+}
+
+.sec-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sec-note { font-size: 11px; color: var(--muted); }
+
+.pad { padding: 2px 16px 14px; }
+
+/* ---------- hero ---------- */
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 2px;
+}
+
+.hero-val {
+  font: 600 26px/1.05 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--v-m);
+  letter-spacing: -0.01em;
+}
+
+.hero-val .u { font-size: 0.62em; font-weight: 500; }
+
+.hero-side { text-align: right; }
+
+.hero-pct {
+  font: 500 17px/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--fg);
+}
+
+.hero-lab { font-size: 11px; color: var(--muted); }
+
+/* ---------- barras ---------- */
+
+.bar {
+  height: 4px;
+  background: var(--rail);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--violet);
+  border-radius: 2px;
+}
+
+.hero .bar { margin: 10px 16px 2px; }
+
+/* ---------- filas de datos ---------- */
+
+.rows { display: grid; gap: 2px; }
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 26px;
+}
+
+.row-lab { font-size: 13px; color: var(--muted); }
+
+.val {
+  font: 500 13px/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.val .u { font-size: 0.72em; font-weight: 500; }
+
+.val-lg { font-size: 15px; font-weight: 600; }
+
+/* escala de color por magnitud */
+.k { color: var(--v-k); }
+.m { color: var(--v-m); }
+.b { color: var(--v-b); }
+
+/* ---------- fila plan / modelo / proyecto con barra ---------- */
+
+.plan { display: grid; gap: 5px; padding: 7px 0; }
+
+.plan-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.plan-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan .bar { height: 3px; }
+
+.plan-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- desglose de hoy ---------- */
+
+.split { border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 8px; }
+
+/* ---------- historial semanal ---------- */
+
+.wk { display: grid; grid-template-columns: 58px 1fr 64px; gap: 10px; align-items: center; padding: 5px 0; }
+
+.wk-day { font-size: 12px; color: var(--muted); }
+
+.wk-day.today { color: var(--fg); font-weight: 600; }
+
+.wk .bar { height: 4px; }
+
+.wk-val { text-align: right; font-size: 12px; }
+
+/* ---------- dos columnas (modelos / proyectos) ---------- */
+
+.duo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.duo > .sec:first-child { border-right: 1px solid var(--border); }
+
+.duo .pad { padding: 2px 12px 12px; }
+.duo .sec-head { padding: 10px 12px 4px; }
+
+.mini {
+  display: grid;
+  gap: 5px;
+  padding: 4px 0;
+}
+
+.mini-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.mini-name {
+  font-size: 12px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini .val { font-size: 12px; }
+.mini .bar { height: 3px; }
+
+/* ---------- acciones ---------- */
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 12px 16px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.btn {
+  appearance: none;
+  min-height: 32px;
+  padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font: 500 12px/1 -apple-system, "SF Pro Text", sans-serif;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn:hover { background: var(--hover); }
+
+.btn-primary {
+  background: var(--violet);
+  border-color: var(--violet);
+  color: oklch(1 0 0);
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: oklch(0.53 0.298 308);
+  color: oklch(1 0 0);
+}
+
+.btn:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* ---------- interruptor de tema (solo demo) ---------- */
+
+.theme-switch {
+  appearance: none;
+  min-height: 34px;
+  padding: 0 18px;
+  border-radius: 17px;
+  border: 1px solid oklch(0.8 0.008 308);
+  background: oklch(1 0 0);
+  color: oklch(0.3 0.02 308);
+  font: 500 12px/1 -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.theme-switch:hover { background: oklch(0.97 0.004 308); }
