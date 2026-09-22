@@ -39,8 +39,9 @@ CLIFF = 272_000
 
 def corto(m):
     """claude-sonnet-5 -> sonnet-5 · gpt-5.6-terra -> terra · claude-haiku-4-5-20251001 -> haiku-4-5"""
-    m = re.sub(r"-\d{8}$", "", (m or "?").replace("claude-", "").replace("gpt-5.6-", ""))
-    return m.split("/")[0]
+    m = re.sub(r"-\d{8}$", "", (m or "?"))
+    m = m.split("/")[-1]                      # anthropic/claude-sonnet-5 -> claude-sonnet-5
+    return m.replace("claude-", "").replace("gpt-5.6-", "")
 
 
 PROVEEDORES_DEFECTO = [
@@ -109,11 +110,37 @@ def proveedores_de(c, modelos=()):
     return salida
 
 
-def proveedor_de(modelo, provs, plan=None):
-    """plan = proveedor real segun el log (providerID de OpenCode, URL base de Hermes...)."""
+NATIVOS = {"Claude (Max)": ("claude", "sonnet", "opus", "haiku", "fable"),
+           "OpenAI (Codex)": ("gpt", "o3", "o4", "codex")}
+
+
+def modelo_nativo(plan, modelo):
+    """¿Este modelo es de la casa de ese plan? GLM usado desde Claude Code NO es de Claude."""
+    patrones = NATIVOS.get(plan)
+    if not patrones:
+        return True
+    m = (modelo or "").lower()
+    return any(p in m for p in patrones)
+
+
+def proveedor_de(modelo, provs, plan=None, fiable=True):
+    """plan = proveedor real segun el log (providerID de OpenCode, URL base de Hermes...).
+
+    Orden: origen fiable del log -> alias del nombre de modelo -> patrones de config -> familia.
+    """
+    m = (modelo or "").lower()
+    if plan and fiable:
+        return alias_de(plan) or plan
+    al = dict(ALIAS_DEFECTO)
+    al.update(cfg().get("aliases") or {})
+    for k in sorted(al, key=len, reverse=True):
+        if k.lower() in m:
+            return al[k]
+    for p in provs:
+        if any(pat and pat in m for pat in p["modelos"]):
+            return p["nombre"]
     if plan:
         return alias_de(plan) or plan
-    m = (modelo or "").lower()
     for p in provs:
         if any(pat and pat in m for pat in p["modelos"]):
             return p["nombre"]
@@ -473,7 +500,9 @@ def agregar(vistos, nuevos=0):
                                                   + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                                   + v[1] * t[1] * (1.5 if over else 1)) / 1e6
                 suma(proys[r.get("proyecto", "otros")], v)
-                pn = proveedor_de(m, provs, r.get("plan"))
+                plan_f = r.get("plan")
+                fiable = bool(plan_f) and modelo_nativo(plan_f, m)
+                pn = proveedor_de(m, provs, plan_f, fiable)
                 pp = por_prov[pn]
                 pp["modelos"].add(corto(m))
                 modelo_prov[corto(m)] = pn
