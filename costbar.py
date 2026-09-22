@@ -562,6 +562,15 @@ def agregar(vistos, nuevos=0):
         return dict(acc)
     semana = agrega(lambda d: d >= hace7)
     mes = agrega(lambda d: d >= hace30)
+    # Un modelo puede servir a dos planes (deepseek por NaN y por OpenRouter): se muestra
+    # el plan con el que mas se consume, para que la etiqueta no mienta.
+    _tok = collections.defaultdict(lambda: collections.defaultdict(int))
+    for _pn, _mods in cruce.items():
+        for _m, _ds in _mods.items():
+            _tok[_m][_pn] = sum(_ds.values())
+    for _m, _d in _tok.items():
+        if _d:
+            modelo_prov[_m] = max(_d, key=_d.get)
     return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana, "mes": mes,
             "modelos_mes": dict(modelos_mes),
             "modelo_dia": {m: dict(v) for m, v in modelo_dia.items()},
@@ -573,7 +582,7 @@ def agregar(vistos, nuevos=0):
             "proveedores": provs_out,
             "cruce": {n: {m: dict(v) for m, v in d2.items()} for n, d2 in cruce.items()},
             "proy_prov": {n: dict(v) for n, v in proy_prov.items()},
-            "modelo_prov": modelo_prov,
+        "modelo_prov": modelo_prov,
             "cache_pct_hoy": pct(dias.get(hoy, vacio())), "nuevos": nuevos,
             "limites": c, "fuentes": len(vistos)}
 
