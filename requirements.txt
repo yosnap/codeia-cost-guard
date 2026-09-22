@@ -1,0 +1,3 @@
+# El medidor y el panel no necesitan nada (solo Python 3.9+).
+# La app de la barra de menus es macOS:
+rumps>=0.4.0

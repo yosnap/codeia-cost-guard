@@ -1,0 +1,7 @@
+panel.html
+__pycache__/
+*.pyc
+state.json
+estado.json
+logs/
+*.log
