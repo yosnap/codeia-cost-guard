@@ -7,6 +7,19 @@ barra de menús. Todo en **tokens**: la **ventana de 5 horas** (la que se agota 
 
 Hecho por [Codeia](https://codeia.dev) — el sitio donde se aprenden estas tecnologías.
 
+## Cómo se ve
+
+El icono de la barra de menús lleva la cifra de la ventana de 5 h; al pulsarlo se abre el desplegable
+(tema claro, oscuro o el del sistema):
+
+![Icono en la barra de menús](docs/img/icono.png)
+
+![Desplegable, claro y oscuro](docs/img/desplegable.png)
+
+Y «Abrir panel» sirve el panel completo en el navegador, con filtros por periodo y por plan:
+
+![Panel](docs/img/panel.png)
+
 ## Por qué
 
 No te arruina el *effort* del modelo: te arruina **cuántas veces le mandas el contexto**. El 75 % del
