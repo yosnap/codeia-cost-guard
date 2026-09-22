@@ -290,7 +290,7 @@ def _pinta_magnitudes(item):
     se queda como estaba: nunca debe romper la barra.
     """
     try:
-        from AppKit import NSMutableAttributedString, NSForegroundColorAttributeName
+        from AppKit import NSMutableAttributedString, NSForegroundColorAttributeName, NSFont, NSFontAttributeName
         from Foundation import NSMakeRange
         ns = getattr(item, "_menuitem", None)
         if ns is None:
@@ -299,6 +299,12 @@ def _pinta_magnitudes(item):
         if not txt:
             return False
         a = NSMutableAttributedString.alloc().initWithString_(txt)
+        try:
+            a.addAttribute_value_range_(NSFontAttributeName, NSFont.monospacedDigitSystemFontOfSize_weight_(12.5, 0.0), NSMakeRange(0, len(txt)))
+        except Exception:
+            pass
+        for mm in re.finditer("\u2588+", txt):
+            a.addAttribute_value_range_(NSForegroundColorAttributeName, _color_ns(color_magnitud(10 ** 9)), NSMakeRange(mm.start(), len(mm.group(0))))
         i = txt.find(":")
         if 0 < i < 40 and txt[:i].lower() not in ("5 h", "semana"):
             a.addAttribute_value_range_(NSForegroundColorAttributeName, _color_ns((255, 0, 140)), NSMakeRange(0, i))
@@ -736,6 +742,21 @@ def agregar(vistos, nuevos=0):
             "limites": c, "fuentes": len(vistos)}
 
 
+def barra(pct, n=10):
+    """Barra de bloque para el menu: se ve de un golpe sin leer el numero."""
+    try:
+        lleno = int(round(n * max(0.0, min(float(pct or 0), 100.0)) / 100.0))
+    except Exception:
+        lleno = 0
+    return "\u2588" * lleno + "\u2591" * (n - lleno)
+
+
+def fila(etiqueta, valor, pct=None, ancho=19):
+    """Fila alineada a columnas: la fuente monoespaciada del menu hace que cuadre."""
+    base = f"{etiqueta:<{ancho}}{valor:>10}"
+    return f"{base}  {barra(pct)}" if pct is not None else base
+
+
 def informa(r):
     h, c5 = r["hoy"], r["cinco_h"]
     fam = " · ".join(f"{k}: {fmt_tok(v)}" for k, v in sorted(c5["fam"].items(), key=lambda x: -x[1]) if v)
@@ -900,25 +921,25 @@ def main():
                 self.menu.clear()
                 m = self._item
                 # la ventana de 5 horas es el dato que se agota en las suscripciones
-                m(f"Ultimas 5 h: {fmt_tok(c5['tok'])} tokens" + (f"  ({r['pct_5h']:.0f} % del limite)" if lim5 else ""))
+                m(fila("Ultimas 5 h", fmt_tok(c5["tok"]), r["pct_5h"] if lim5 else None) + (f"   {r['pct_5h']:.0f} % del limite" if lim5 else "   tokens"))
                 for k, v in sorted(c5["fam"].items(), key=lambda x: -x[1]):
                     if v:
                         m(f"   {k}: {fmt_tok(v)}")
-                m(f"Semana: {fmt_tok(r['semana']['tok'])} tokens · {r['semana']['turnos']} turnos")
+                m(fila("Semana", fmt_tok(r["semana"]["tok"]), r["pct_semana"] if r["limites"].get("limite_semana_tokens") else None) + f"   {r['semana']['turnos']} turnos")
                 pv = rumps.MenuItem("Por proveedor (plan)")
                 for nombre, x in r["proveedores"].items():
                     if not x["cinco_h"] and not x["semana"]:
                         continue
-                    txt = f"{nombre}: 5 h {fmt_tok(x['cinco_h'])}"
-                    if x["pct_5h"]:
-                        txt += f" ({x['pct_5h']:.0f} %)"
-                    txt += f" · semana {fmt_tok(x['semana'])}"
+                    txt = fila(nombre, fmt_tok(x["cinco_h"]), x["pct_5h"] if x["pct_5h"] else None)
+                    txt += "   " + f"sem {fmt_tok(x['semana']):>9}"
                     if x["pct_semana"]:
-                        txt += f" ({x['pct_semana']:.0f} %)"
+                        txt += " " + barra(x["pct_semana"], 6)
+                    if x["pct_5h"]:
+                        txt += f"   {x['pct_5h']:.0f} % de 5 h"
                     pv.add(rumps.MenuItem(txt))
                 self.menu.add(pv)
                 self.menu.add(rumps.separator)
-                m(f"Hoy: {fmt_tok(h['tok'])} tokens · {h['turnos']} turnos")
+                m(fila("Hoy", fmt_tok(h["tok"])) + f"   {h['turnos']} turnos")
                 m(f"   entrada {fmt_tok(h['gi'])} · salida {fmt_tok(h['go'])}")
                 m(f"   cache leida {fmt_tok(h['cr'])} ({r['cache_pct_hoy']:.0f} % de la entrada) · escrita {fmt_tok(h['cw'])}")
                 m(f"Ritmo ultima hora: {fmt_tok(r['ritmo']['tok'])} tokens" + ("  ALTO" if alto else ""))
