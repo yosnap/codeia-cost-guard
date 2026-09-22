@@ -13,7 +13,7 @@ Uso:
     ./venv/bin/python costbar.py --print      # imprime el informe y sale (sin GUI)
     ./venv/bin/python costbar.py              # icono en la barra de menus
 """
-import collections, glob, hashlib, json, os, re, subprocess, sys, time, urllib.parse
+import collections, glob, hashlib, json, os, re, sqlite3, subprocess, sys, time, urllib.parse
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
@@ -23,7 +23,7 @@ LOG = f"{AQUI}/logs/costbar.log"
 FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions", f"{HOME}/.local/share/opencode"]
 DIAS = 31
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
-VERSION_ESTADO = 7          # subir cuando cambie el formato del cache: obliga a reescanear
+VERSION_ESTADO = 8          # subir cuando cambie el formato del cache: obliga a reescanear
 
 # tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache) — solo para el equivalente API
 TARIFAS = {
@@ -49,12 +49,19 @@ PROVEEDORES_DEFECTO = [
 ]
 
 
-def proveedores_de(c):
+def familia_de(m):
+    """glm5.3-flash -> glm · qwen3.8-27b -> qwen · claude-sonnet-5 -> claude"""
+    m = corto(m or "")
+    g = re.match(r"[a-z]+", m)
+    return g.group(0) if g else m
+
+
+def proveedores_de(c, modelos=()):
     """Proveedores declarados en config.json: nombre, patrones de modelo y limites (0 = sin declarar).
 
     Cada plan es una cuota distinta (y una suscripcion distinta), asi que se miden por separado.
     """
-    lista = c.get("proveedores") or PROVEEDORES_DEFECTO
+    lista = c.get("proveedores") if c.get("proveedores") else PROVEEDORES_DEFECTO
     salida = []
     for p in lista:
         if not isinstance(p, dict):
@@ -63,6 +70,18 @@ def proveedores_de(c):
                        "modelos": [str(m).lower() for m in (p.get("modelos") or [])],
                        "limite_5h_tokens": p.get("limite_5h_tokens") or 0,
                        "limite_semana_tokens": p.get("limite_semana_tokens") or 0})
+    # lo que no este declarado en config.json aparece solo, agrupado por familia de modelo
+    auto = collections.defaultdict(set)
+    for m in modelos:
+        mm = (m or "").lower()
+        if not mm or mm == "sin-modelo":
+            continue
+        if any(pat and pat in mm for p in salida for pat in p["modelos"]):
+            continue
+        auto[familia_de(m)].add(corto(m))
+    for fam, ms in sorted(auto.items()):
+        salida.append({"nombre": fam, "modelos": sorted(ms), "auto": True,
+                       "limite_5h_tokens": 0, "limite_semana_tokens": 0})
     return salida
 
 
@@ -238,6 +257,78 @@ def parsear(ruta):
             "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy}
 
 
+def leer_bases():
+    """OpenCode y Hermes no escriben .jsonl: guardan el consumo en SQLite."""
+    dia = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))
+    turnos = collections.defaultdict(int)
+    horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)})
+    nombres = []
+
+    def limpia_modelo(m):
+        m = m or ""
+        if m.strip().startswith("{"):
+            try:
+                d = json.loads(m)
+                m = d.get("id") or d.get("modelID") or m
+            except Exception:
+                pass
+        return m.strip()
+
+    def mete(ts, modelo, gi, go, cr, cw):
+        modelo = limpia_modelo(modelo)
+        if not ts or len(str(ts)) < 10:
+            return
+        ts = str(ts)
+        k = modelo or "sin-modelo"
+        a = dia[ts[:10]][k]
+        a[0] += gi; a[1] += go; a[2] += cr; a[3] += cw
+        turnos[ts[:10]] += 1
+        if len(ts) >= 13:
+            tok = gi + go + cr + cw
+            horas[ts[:13]]["tok"] += tok
+            horas[ts[:13]]["mod"][k] += tok
+            tr = tarifa(k)
+            if tr:
+                over = gi > CLIFF
+                horas[ts[:13]]["usd"] += (max(gi - cr, 0) * tr[0] * (2 if over else 1) + cr * tr[2] * (2 if over else 1)
+                                          + cw * tr[3] * (2 if over else 1) + go * tr[1] * (1.5 if over else 1)) / 1e6
+
+    def hora(v):
+        v = v or 0
+        if v > 1e11:            # milisegundos
+            v /= 1000
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(v)) if v else ""
+
+    # OpenCode
+    for ruta in (f"{HOME}/.local/share/opencode/opencode.db", f"{HOME}/.local/share/opencode/opencode-.db"):
+        if not os.path.exists(ruta):
+            continue
+        try:
+            con = sqlite3.connect(f"file:{ruta}?mode=ro", uri=True)
+            filas = list(con.execute("select model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created from session"))
+            con.close()
+            for m, ti, to, tcr, tcw, creado in filas:
+                mete(hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0)
+            nombres.append(f"OpenCode ({len(filas)})")
+            break
+        except Exception as e:
+            log(f"opencode {ruta}: {type(e).__name__}: {e}")
+    # Hermes (todos los perfiles)
+    for db in sorted(glob.glob(f"{HOME}/.hermes/profiles/*/state.db")):
+        try:
+            perfil = db.split("/profiles/")[-1].split("/")[0]
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            filas = list(con.execute("select model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at from sessions"))
+            con.close()
+            for m, i, o, cr, cw, ini in filas:
+                mete(hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
+            nombres.append(f"Hermes/{perfil} ({len(filas)})")
+        except Exception as e:
+            log(f"hermes {db}: {type(e).__name__}: {e}")
+    return ({"dia": {k: {m: v for m, v in d.items()} for k, d in dia.items()},
+             "turnos": dict(turnos), "horas": dict(horas), "proyecto": "Hermes/OpenCode"}, nombres)
+
+
 def escanear():
     estado = leer_estado()
     vistos, nuevos = {}, 0
@@ -259,9 +350,15 @@ def escanear():
                 r["clave"] = clave
                 vistos[f] = r
                 nuevos += 1
+    bases, nombres_bases = leer_bases()
+    bases["clave"] = "bases"
+    vistos["sqlite:opencode+hermes"] = bases
     estado["ficheros"] = vistos
     guardar_estado(estado)
-    return agregar(vistos, nuevos)
+    r = agregar(vistos, nuevos)
+    r["fuentes"] = r["fuentes"] + len(nombres_bases)
+    r["bases"] = nombres_bases
+    return r
 
 
 def vacio():
@@ -286,8 +383,12 @@ def agregar(vistos, nuevos=0):
     proys = collections.defaultdict(vacio)
     ritmo = {"tok": 0, "usd": 0.0}
     cinco = {"tok": 0, "usd": 0.0, "fam": collections.defaultdict(int)}
-    provs = proveedores_de(cfg())
+    modelos_vistos = {m for r in vistos.values() for mods in r.get("dia", {}).values() for m in mods}
+    provs = proveedores_de(cfg(), modelos_vistos)
     por_prov = collections.defaultdict(lambda: {"cinco_h": 0, "semana": 0, "hoy": 0, "mes": 0, "modelos": set()})
+    cruce = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))
+    proy_prov = collections.defaultdict(lambda: collections.defaultdict(int))
+    modelo_prov = {}
     ahora = time.time()
     for f, r in vistos.items():
         for d, mods in r.get("dia", {}).items():
@@ -312,9 +413,13 @@ def agregar(vistos, nuevos=0):
                                                   + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                                   + v[1] * t[1] * (1.5 if over else 1)) / 1e6
                 suma(proys[r.get("proyecto", "otros")], v)
-                pp = por_prov[proveedor_de(m, provs)]
+                pn = proveedor_de(m, provs)
+                pp = por_prov[pn]
                 pp["modelos"].add(corto(m))
+                modelo_prov[corto(m)] = pn
                 tokv = v[0] + v[1] + v[2] + v[3]
+                cruce[pn][corto(m)][d] += tokv
+                proy_prov[pn][r.get("proyecto", "otros")] += tokv
                 if d >= hace7:
                     pp["semana"] += tokv
                 if d >= hace30:
@@ -377,6 +482,9 @@ def agregar(vistos, nuevos=0):
             "dias": {d: dias[d] for d in dias if d},
             "modelos_hoy": dict(modelos_hoy), "proyectos": dict(proys),
             "proveedores": provs_out,
+            "cruce": {n: {m: dict(v) for m, v in d2.items()} for n, d2 in cruce.items()},
+            "proy_prov": {n: dict(v) for n, v in proy_prov.items()},
+            "modelo_prov": modelo_prov,
             "cache_pct_hoy": pct(dias.get(hoy, vacio())), "nuevos": nuevos,
             "limites": c, "fuentes": len(vistos)}
 
@@ -384,14 +492,16 @@ def agregar(vistos, nuevos=0):
 def informa(r):
     h, c5 = r["hoy"], r["cinco_h"]
     fam = " · ".join(f"{k}: {fmt_tok(v)}" for k, v in sorted(c5["fam"].items(), key=lambda x: -x[1]) if v)
-    L = [f"VENTANA 5 H  {fmt_tok(c5['tok'])} tokens" + (f"   {fam}" if fam else ""),
-         f"SEMANA       {fmt_tok(r['semana']['tok'])} tokens ({r['semana']['turnos']} turnos)",
-         f"HOY          {fmt_tok(h['tok'])} tokens ({h['turnos']} turnos)   ritmo ultima hora {fmt_tok(r['ritmo']['tok'])} tokens",
+    L = [f"fuentes: " + " · ".join(r.get("bases") or []) ,
+         f"VENTANA 5 H  {fmt_tok(c5['tok'])} tokens" + (f"   {fam}" if fam else ""),
+         f"SEMANA       {fmt_tok(r['semana']['tok'])} tokens ({int(r['semana']['turnos'])} turnos)",
+         f"MES (30 d)   {fmt_tok(r['mes']['tok'])} tokens ({int(r['mes']['turnos'])} turnos)",
+         f"HOY          {fmt_tok(h['tok'])} tokens ({int(h['turnos'])} turnos)   ritmo ultima hora {fmt_tok(r['ritmo']['tok'])} tokens",
          f"             entrada {fmt_tok(h['gi'])} · salida {fmt_tok(h['go'])} · cache leida {fmt_tok(h['cr'])} ({r['cache_pct_hoy']:.0f} %) · cache escrita {fmt_tok(h['cw'])}",
          "por dia: " + " · ".join(f"{d[5:]}: {fmt_tok(v['tok'])}" for d, v in sorted(r["dias"].items())),
          "modelos hoy: " + " · ".join(f"{corto(k)}: {fmt_tok(v['tok'])}" for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1]["tok"])[:6]),
          "planes: " + " · ".join(f"{n}: 5h {fmt_tok(x['cinco_h'])}" + (f" ({x['pct_5h']:.0f} %)" if x["pct_5h"] else "") + f" · sem {fmt_tok(x['semana'])}" for n, x in r["proveedores"].items() if x["cinco_h"] or x["semana"]),
-         "proyectos 7d: " + " · ".join(f"{k}: {fmt_tok(v['tok'])}" for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1]["tok"])[:5]),
+         "proyectos (mes): " + " · ".join(f"{k}: {fmt_tok(v['tok'])}" for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1]["tok"])[:5]),
          f"equivalente API (informativo): {h['usd']:.2f} USD hoy · {r['semana']['usd']:.0f} USD en 7 dias"]
     return "\n".join(L)
 
