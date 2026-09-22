@@ -62,6 +62,14 @@ def main():
         ("Cache leida hoy", costbar.fmt_tok(h["cr"])), ("Cache escrita hoy", costbar.fmt_tok(h["cw"])),
     ))
 
+    provs = r["proveedores"]
+    tope = max([x["cinco_h"] for x in provs.values()] or [1]) or 1
+    prov_txt = "<section><h2>Por proveedor (plan)</h2>" + "\n".join(
+        f"""<div class="fila"><span class="et">{html.escape(n)}{f" · {x['pct_5h']:.0f} % de su cuota" if x['pct_5h'] else ""}</span>
+        <span class="pista"><span class="barra" style="width:{min(x['cinco_h'] / tope * 100, 100):.1f}%"></span></span>
+        <span class="val">5 h {costbar.fmt_tok(x['cinco_h'])}</span></div>"""
+        for n, x in provs.items() if x["cinco_h"] or x["semana"]) + "</section>"
+
     html_txt = f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="60">
 <title>Consumo de tokens</title>
@@ -102,6 +110,7 @@ def main():
 {detalle}
 {progreso(c5["tok"], lim.get("limite_5h_tokens"), "Ventana de 5 horas")}
 {progreso(sem["tok"], lim.get("limite_semana_tokens"), "Semana")}
+{prov_txt}
 <section><h2>Por dia (tokens)</h2>{barras([(d[5:], v["tok"]) for d, v in dias])}</section>
 <section><h2>Por modelo (hoy, tokens)</h2>{barras(mods)}</section>
 <section><h2>Por proyecto (7 dias, tokens)</h2>{barras(proys)}</section>

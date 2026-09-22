@@ -1,0 +1,55 @@
+{
+  "_nota": "Cada plan tiene su cuota. Pon limite_5h_tokens y limite_semana_tokens cuando los sepas (0 = sin declarar) y veras el % en el icono y en el panel.",
+  "limite_hora_tokens": 8000000,
+  "proveedores": [
+    {
+      "nombre": "Claude (Max)",
+      "modelos": [
+        "claude",
+        "sonnet",
+        "opus",
+        "haiku",
+        "fable"
+      ],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "OpenAI (Codex)",
+      "modelos": [
+        "gpt",
+        "o3",
+        "o4",
+        "codex"
+      ],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "z.ai (GLM)",
+      "modelos": [
+        "glm"
+      ],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "NaN",
+      "modelos": [
+        "gemma",
+        "nan"
+      ],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "nodeclub.ai",
+      "modelos": [
+        "qwen",
+        "deepseek"
+      ],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    }
+  ]
+}

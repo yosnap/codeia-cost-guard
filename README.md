@@ -53,6 +53,26 @@ ahorro en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md`: `./install.sh --reglas`.
 - **Ritmo de la última hora**, con aviso si pasa del límite.
 - Por día, por modelo y por proyecto.
 
+## Configurar tus planes (proveedores)
+
+Los logs dicen qué modelo se usó, nunca qué cuota tienes: eso solo lo sabe tu proveedor. Declara cada
+plan en `config.json` (mira `config.example.json`) y el panel y el icono medirán **por plan**, con el
+**% de la ventana de 5 h y de la semana** que llevas consumido:
+
+```bash
+python3 costbar.py --proveedores    # lista tus modelos por proveedor y te da la config lista para pegar
+```
+
+```json
+{"proveedores": [
+  {"nombre": "Claude (Max)", "modelos": ["claude", "sonnet", "opus", "haiku", "fable"],
+   "limite_5h_tokens": 0, "limite_semana_tokens": 0},
+  {"nombre": "z.ai (GLM)", "modelos": ["glm"], "limite_5h_tokens": 0, "limite_semana_tokens": 0}
+]}
+```
+
+Con los límites a 0 se muestran tokens en crudo; al ponerlos aparece el porcentaje.
+
 ## Cómo cuenta
 
 Dos formatos distintos, y confundirlos infla los totales (lo aprendimos midiendo):

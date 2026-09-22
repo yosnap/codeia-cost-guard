@@ -23,7 +23,7 @@ LOG = f"{AQUI}/logs/costbar.log"
 FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions", f"{HOME}/.local/share/opencode"]
 DIAS = 7
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
-VERSION_ESTADO = 4          # subir cuando cambie el formato del cache: obliga a reescanear
+VERSION_ESTADO = 6          # subir cuando cambie el formato del cache: obliga a reescanear
 
 # tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache) — solo para el equivalente API
 TARIFAS = {
@@ -43,13 +43,34 @@ def corto(m):
     return m.split("/")[0]
 
 
-def familia(m):
-    """Claude y OpenAI son suscripciones distintas: interesa verlas por separado."""
-    m = (m or "").lower()
-    if "claude" in m:
-        return "claude"
-    if "gpt" in m or m.startswith(("o3", "o4", "codex")):
-        return "openai"
+PROVEEDORES_DEFECTO = [
+    {"nombre": "Claude", "modelos": ["claude"]},
+    {"nombre": "OpenAI", "modelos": ["gpt", "o3", "o4", "codex"]},
+]
+
+
+def proveedores_de(c):
+    """Proveedores declarados en config.json: nombre, patrones de modelo y limites (0 = sin declarar).
+
+    Cada plan es una cuota distinta (y una suscripcion distinta), asi que se miden por separado.
+    """
+    lista = c.get("proveedores") or PROVEEDORES_DEFECTO
+    salida = []
+    for p in lista:
+        if not isinstance(p, dict):
+            continue
+        salida.append({"nombre": str(p.get("nombre") or "?"),
+                       "modelos": [str(m).lower() for m in (p.get("modelos") or [])],
+                       "limite_5h_tokens": p.get("limite_5h_tokens") or 0,
+                       "limite_semana_tokens": p.get("limite_semana_tokens") or 0})
+    return salida
+
+
+def proveedor_de(modelo, provs):
+    m = (modelo or "").lower()
+    for p in provs:
+        if any(pat and pat in m for pat in p["modelos"]):
+            return p["nombre"]
     return "otros"
 
 
@@ -99,8 +120,9 @@ def leer_estado():
 
 def guardar_estado(s):
     s["version"] = VERSION_ESTADO
-    tmp = STATE + ".tmp"
-    json.dump(s, open(tmp, "w"))
+    tmp = f"{STATE}.{os.getpid()}.tmp"      # unico por proceso: si la app y un informe coinciden, no chocan
+    with open(tmp, "w") as f:
+        json.dump(s, f)
     os.replace(tmp, STATE)
 
 
@@ -134,7 +156,7 @@ def parsear(ruta):
     """
     dia = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))
     turnos = collections.defaultdict(int)
-    horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "fam": collections.defaultdict(int)})
+    horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)})
     vistos = set()
     proy = "codex/otros"
     if "/projects/" in ruta:
@@ -146,6 +168,10 @@ def parsear(ruta):
     except Exception:
         return None
     for linea in fh:
+        if '"model"' in linea or "\"model\"" in linea:
+            m = re.search(r'"model"\s*:\s*"([^"]+)"', linea)
+            if m:
+                modelo = m.group(1)
         if "input_tokens" not in linea and "inputTokens" not in linea:
             continue
         try:
@@ -153,9 +179,6 @@ def parsear(ruta):
         except Exception:
             continue
         ts = str(d.get("timestamp") or d.get("ts") or "")
-        m = re.search(r'"model"\s*:\s*"([^"]+)"', linea)
-        if m:
-            modelo = m.group(1)
         uso = _hallar_uso(d)
         if not uso:
             continue
@@ -184,7 +207,7 @@ def parsear(ruta):
             turnos[ts[:10]] += 1
         if len(ts) >= 13:
             horas[ts[:13]]["tok"] += tok
-            horas[ts[:13]]["fam"][familia(k)] += tok
+            horas[ts[:13]]["mod"][k] += tok
             t = tarifa(k)
             if t:
                 over = gi > CLIFF
@@ -240,6 +263,8 @@ def agregar(vistos, nuevos=0):
     proys = collections.defaultdict(vacio)
     ritmo = {"tok": 0, "usd": 0.0}
     cinco = {"tok": 0, "usd": 0.0, "fam": collections.defaultdict(int)}
+    provs = proveedores_de(cfg())
+    por_prov = collections.defaultdict(lambda: {"cinco_h": 0, "semana": 0, "hoy": 0, "modelos": set()})
     ahora = time.time()
     for f, r in vistos.items():
         for d, mods in r.get("dia", {}).items():
@@ -261,6 +286,12 @@ def agregar(vistos, nuevos=0):
                                                   + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                                   + v[1] * t[1] * (1.5 if over else 1)) / 1e6
                 suma(proys[r.get("proyecto", "otros")], v)
+                pp = por_prov[proveedor_de(m, provs)]
+                pp["modelos"].add(corto(m))
+                tokv = v[0] + v[1] + v[2] + v[3]
+                pp["semana"] += tokv
+                if d == hoy:
+                    pp["hoy"] += tokv
         for d, n in r.get("turnos", {}).items():
             if d and d >= desde:
                 dias[d]["turnos"] += n
@@ -278,8 +309,8 @@ def agregar(vistos, nuevos=0):
             if edad < VENTANA_H * 3600:            # ventana de 5 horas de la suscripcion
                 cinco["tok"] += v.get("tok", 0)
                 cinco["usd"] += v.get("usd", 0.0)
-                for k2, t2 in (v.get("fam") or {}).items():
-                    cinco["fam"][k2] += t2
+                for k2, t2 in (v.get("mod") or {}).items():
+                    cinco["fam"][proveedor_de(k2, provs)] += t2
 
     def pct(bloque):
         entrada_total = bloque["gi"] + bloque["cr"] + bloque["cw"]
@@ -289,6 +320,16 @@ def agregar(vistos, nuevos=0):
         dias[d]["cache_pct"] = pct(dias[d])
     c = cfg()
     lim5, limsem = c.get("limite_5h_tokens") or 0, c.get("limite_semana_tokens") or 0
+    for n, t2 in cinco["fam"].items():          # la ventana de 5 h, por proveedor
+        por_prov[n]["cinco_h"] = t2
+    lim_prov = {p["nombre"]: (p["limite_5h_tokens"], p["limite_semana_tokens"]) for p in provs}
+    provs_out = {}
+    for n, x in sorted(por_prov.items(), key=lambda kv: -kv[1]["cinco_h"]):
+        l5, ls = lim_prov.get(n, (0, 0))
+        provs_out[n] = {"cinco_h": x["cinco_h"], "semana": x["semana"], "hoy": x["hoy"],
+                        "modelos": sorted(x["modelos"]),
+                        "pct_5h": (x["cinco_h"] / l5 * 100) if l5 else 0.0,
+                        "pct_semana": (x["semana"] / ls * 100) if ls else 0.0}
     semana = {k: sum(dias[d][k] for d in dias if d) for k in ("gi", "go", "cr", "cw", "tok", "turnos")}
     semana["usd"] = sum(dias[d]["usd"] for d in dias if d)
     return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana,
@@ -297,6 +338,7 @@ def agregar(vistos, nuevos=0):
             "pct_semana": (semana["tok"] / limsem * 100) if limsem else 0.0,
             "dias": {d: dias[d] for d in dias if d},
             "modelos_hoy": dict(modelos_hoy), "proyectos": dict(proys),
+            "proveedores": provs_out,
             "cache_pct_hoy": pct(dias.get(hoy, vacio())), "nuevos": nuevos,
             "limites": c, "fuentes": len(vistos)}
 
@@ -310,12 +352,25 @@ def informa(r):
          f"             entrada {fmt_tok(h['gi'])} · salida {fmt_tok(h['go'])} · cache leida {fmt_tok(h['cr'])} ({r['cache_pct_hoy']:.0f} %) · cache escrita {fmt_tok(h['cw'])}",
          "por dia: " + " · ".join(f"{d[5:]}: {fmt_tok(v['tok'])}" for d, v in sorted(r["dias"].items())),
          "modelos hoy: " + " · ".join(f"{corto(k)}: {fmt_tok(v['tok'])}" for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1]["tok"])[:6]),
+         "planes: " + " · ".join(f"{n}: 5h {fmt_tok(x['cinco_h'])}" + (f" ({x['pct_5h']:.0f} %)" if x["pct_5h"] else "") + f" · sem {fmt_tok(x['semana'])}" for n, x in r["proveedores"].items() if x["cinco_h"] or x["semana"]),
          "proyectos 7d: " + " · ".join(f"{k}: {fmt_tok(v['tok'])}" for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1]["tok"])[:5]),
          f"equivalente API (informativo): {h['usd']:.2f} USD hoy · {r['semana']['usd']:.0f} USD en 7 dias"]
     return "\n".join(L)
 
 
 def main():
+    if "--proveedores" in sys.argv:
+        r = escanear()
+        print("Modelos usados en los ultimos 7 dias, agrupados por proveedor:")
+        for n, x in r["proveedores"].items():
+            print(f"  {n:<14} {', '.join(x['modelos']) or '-'}")
+        print("\nCopia esto en config.json y pon tus cuotas (0 = sin declarar):\n")
+        prop = [{"nombre": n, "modelos": x["modelos"], "limite_5h_tokens": 0, "limite_semana_tokens": 0}
+                for n, x in r["proveedores"].items() if n != "otros"]
+        print(json.dumps({"proveedores": prop}, indent=2, ensure_ascii=False))
+        print("\nLas cuotas de cada plan las sabe el proveedor, no los logs: ponlas cuando las tengas")
+        print("y veras el % de la ventana de 5 h y de la semana en el icono y en el panel.")
+        return
     if "--print" in sys.argv:
         print(informa(escanear()))
         return
@@ -363,6 +418,18 @@ def main():
                     if v:
                         m(f"   {k}: {fmt_tok(v)}")
                 m(f"Semana: {fmt_tok(r['semana']['tok'])} tokens · {r['semana']['turnos']} turnos")
+                pv = rumps.MenuItem("Por proveedor (plan)")
+                for nombre, x in r["proveedores"].items():
+                    if not x["cinco_h"] and not x["semana"]:
+                        continue
+                    txt = f"{nombre}: 5 h {fmt_tok(x['cinco_h'])}"
+                    if x["pct_5h"]:
+                        txt += f" ({x['pct_5h']:.0f} %)"
+                    txt += f" · semana {fmt_tok(x['semana'])}"
+                    if x["pct_semana"]:
+                        txt += f" ({x['pct_semana']:.0f} %)"
+                    pv.add(rumps.MenuItem(txt))
+                self.menu.add(pv)
                 self.menu.add(rumps.separator)
                 m(f"Hoy: {fmt_tok(h['tok'])} tokens · {h['turnos']} turnos")
                 m(f"   entrada {fmt_tok(h['gi'])} · salida {fmt_tok(h['go'])}")
