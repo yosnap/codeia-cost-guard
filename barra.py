@@ -18,9 +18,11 @@ import sys
 
 import objc
 from AppKit import (
+    NSAppearance,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSColor,
+    NSEvent,
     NSImage,
     NSMakeRect,
     NSMakeSize,
@@ -33,10 +35,13 @@ from AppKit import (
 from Foundation import NSData, NSObject, NSTimer, NSURL
 from PIL import Image, ImageDraw, ImageFont
 
+import costbar   # el motor: aqui solo por el servidor del panel (servir) y su puerto
+
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable   # el mismo intérprete que corre esto
 LOG = f"{AQUI}/logs/barra.log"
+CONFIG = f"{AQUI}/config.json"
 
 VIOLETA = (174, 0, 255)
 ROSA = (255, 0, 140)
@@ -44,10 +49,49 @@ SUAVE = (154, 120, 214)
 GRIS = (0, 0, 0, 40)
 ANCHO_ICONO = 74
 
+NAVEGADORES = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+)
+
 
 def log(txt):
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(f"{subprocess.run(['date', '+%Y-%m-%d %H:%M:%S'], capture_output=True, text=True).stdout.strip()} {txt}\n")
+
+
+def navegador():
+    """El primero que haya instalado: Chrome, Chromium, Brave o Edge."""
+    for ruta in NAVEGADORES:
+        if os.path.exists(ruta):
+            return ruta
+    return None
+
+
+def tema_preferido():
+    """Lo que diga config.json ('claro' / 'oscuro' / 'sistema'); por defecto 'sistema'."""
+    try:
+        import json
+        return (json.load(open(CONFIG)).get("tema") or "sistema").strip().lower()
+    except Exception:
+        return "sistema"
+
+
+def tema_del_sistema():
+    """Apariencia actual de macOS. Sin la clave (modo claro) 'defaults read' falla: es normal."""
+    try:
+        r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                           capture_output=True, text=True, timeout=5)
+        return "oscuro" if r.stdout.strip().lower() == "dark" else "claro"
+    except Exception:
+        return "claro"
+
+
+def tema_activo():
+    pref = tema_preferido()
+    return tema_del_sistema() if pref == "sistema" else pref
 
 
 def trocea(txt):
@@ -86,11 +130,11 @@ def imagen_icono(texto, color, pct):
     im = Image.new("RGBA", (ancho, alto), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle([0, 3 * escala, ancho - 1, alto - 4 * escala], radius=4 * escala,
-                        fill=(0, 0, 0, 0), outline=(128, 128, 128, 90), width=escala)
+                        fill=(0, 0, 0, 0), outline=(0, 0, 0, 110), width=escala)
     relleno = max(0, min(ancho - 2 * escala, int((ancho - 2 * escala) * pct / 100.0)))
     if relleno > 0:
         d.rounded_rectangle([escala, 4 * escala, escala + relleno, alto - 5 * escala],
-                            radius=3 * escala, fill=color + (235,))
+                            radius=3 * escala, fill=(0, 0, 0, 90))      # plantilla: solo cuenta el alfa
     fuente = None
     for ruta in ("/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
                  "/System/Library/Fonts/Helvetica.ttc"):
@@ -104,7 +148,7 @@ def imagen_icono(texto, color, pct):
         fuente = ImageFont.load_default()
     caja = d.textbbox((0, 0), texto, font=fuente)
     d.text(((ancho - (caja[2] - caja[0])) / 2, (alto - (caja[3] - caja[1])) / 2 - caja[1]), texto,
-           font=fuente, fill=color + (255,))
+           font=fuente, fill=(0, 0, 0, 255))
     return im          # RGBA: si se pasa a RGB, lo transparente se vuelve NEGRO
 
 
@@ -115,6 +159,7 @@ def imagen_ns(texto, color, pct):
     datos_png = open(ruta, "rb").read()
     img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos_png, len(datos_png)))
     img.setSize_((ANCHO_ICONO, 18))
+    img.setTemplate_(True)    # macOS lo pinta blanco o negro segun la barra, como sus propios iconos
     return img
 
 
@@ -124,16 +169,23 @@ class VistaDesplegable(NSImageView):
     def acceptsFirstMouse_(self, _e):
         return True
 
+    def hitTest_(self, _punto):
+        # NSImageView no editable devuelve nil aqui y el clic se va al popover (que se cierra)
+        return self
+
     def mouseDown_(self, evento):
         try:
             p = self.convertPoint_fromView_(evento.locationInWindow(), None)
-            ancho, alto = self.frame().size.width, self.frame().size.height
-            if p.y > alto - 46:                      # la fila de acciones (abajo del todo)
-                x = p.x / max(1.0, ancho)
-                zona = "Abrir panel" if x < 0.28 else ("Guia" if x < 0.45 else ("Refrescar" if x < 0.68 else "Salir"))
-                self.accion_(zona)
-        except Exception:
-            pass
+            ancho = self.frame().size.width
+            # la vista no esta volteada: y=0 es el borde INFERIOR. El PNG va recortado a la
+            # tarjeta: abajo la fila de acciones (58 pt) y justo encima los chips de tema (36 pt).
+            x = p.x / max(1.0, ancho)
+            if p.y < 58:                   # cuatro columnas iguales dentro de la tarjeta
+                self.accion_("Abrir panel" if x < 0.28 else ("Guia" if x < 0.51 else ("Refrescar" if x < 0.74 else "Salir")))
+            elif p.y < 96:                 # tres chips: claro / oscuro / sistema
+                self.accion_("tema:" + ("claro" if x < 0.36 else ("oscuro" if x < 0.66 else "sistema")))
+        except Exception as e:
+            log(f"ERROR clic {type(e).__name__}: {e}")
 
     def accion_(self, zona):
         dueno = getattr(self, "dueno", None)
@@ -169,70 +221,115 @@ class Barra(NSObject):
         ancho, alto = 404, 664
         self.pop = NSPopover.alloc().init()
         self.pop.setContentSize_(NSMakeSize(ancho, alto))
-        self.pop.setBehavior_(1)
+        # Comportamiento "definido por la app" (0), no "transitorio": el Chrome headless que
+        # renderiza los PNG roba el foco un instante y un popover transitorio se cerraria solo.
+        # El cierre por clic fuera lo hace este monitor (los clics dentro no pasan por el).
+        self.pop.setBehavior_(0)
+        self.monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+            (1 << 1) | (1 << 3), lambda _e: self.pop.performClose_(None) if self.pop.isShown() else None)
         vc = NSViewController.alloc().init()
         vista = VistaDesplegable.alloc().initWithFrame_(NSMakeRect(0, 0, ancho, alto))
+        vista.setImageScaling_(3)          # NSImageScaleAxesIndependently: el PNG llena la vista
+        vista.setImageAlignment_(0)
+        vista.setAutoresizingMask_(18)     # ancho y alto siguen al contenido del popover
         vista.dueno = self
         vc.setView_(vista)
         self.pop.setContentViewController_(vc)
         self.vista = vista
         log("popover listo")
 
-    def render(self, tema="claro"):
-        """Regenera el HTML de ese tema y lo pasa a PNG. Se cachea: el clic no espera."""
-        salida = f"{AQUI}/popover_{tema}.png"
-        html = f"{AQUI}/popover{'_oscuro' if tema == 'oscuro' else ''}.html"
-        subprocess.run([PY, f"{AQUI}/popover.py"] + (["--tema", "oscuro"] if tema == "oscuro" else []),
-                       capture_output=True, timeout=120)
-        bruto = f"{AQUI}/logs/_bruto_{tema}.png"
-        subprocess.run(["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "--headless=new",
-                        "--hide-scrollbars", "--default-background-color=00000000",
-                        "--force-device-scale-factor=2", f"--screenshot={bruto}",
-                        "--window-size=404,1300", f"file://{html}"], capture_output=True, timeout=180)
-        try:
-            from PIL import Image, ImageDraw
-            im = Image.open(bruto)  # (nada de convertir a RGB: rompe la transparencia)
-            corte = im.size[1]
-            for y in range(im.size[1] - 1, 0, -1):
-                fila = [im.getpixel((x, y)) for x in range(0, im.size[0], 8)]
-                # "contenido" = pixel oscuro o con color; el fondo claro del diseño no cuenta
-                if any(min(q) < 205 or (max(q) - min(q)) > 25 for q in fila):
-                    corte = min(im.size[1], y + 12)
-                    break
-            im.crop((0, 0, im.size[0], corte)).save(salida)
-            log(f"recorte {tema}: {im.size[1] // 2} pt de alto")
-        except Exception as e:
-            log(f"no pude recortar: {type(e).__name__}: {e}")
-        log(f"render {tema}: {os.path.getsize(salida) if os.path.exists(salida) else 0} B")
-        return salida
+    def render(self, tema=None):
+        """Regenera los DOS temas de una vez (un solo escaneo) y recorta cada PNG a la tarjeta.
 
-    def alto_del_png(self, ruta):
-        """El PNG ya viene recortado a su contenido: su alto es el del popover."""
+        Asi cambiar de tema es instantaneo: solo se cambia de imagen. El argumento se acepta
+        por compatibilidad; devuelve la ruta del tema pedido (o del activo).
+        """
+        chrome = navegador()
+        if chrome is None:
+            log("ERROR render: no hay Chrome, Chromium, Brave ni Edge instalado")
+            return f"{AQUI}/popover_{tema or tema_activo()}.png"
+        subprocess.run([PY, f"{AQUI}/popover.py"], capture_output=True, timeout=120)
+        for t in ("claro", "oscuro"):
+            html = f"{AQUI}/popover{'_oscuro' if t == 'oscuro' else ''}.html"
+            bruto = f"{AQUI}/logs/_bruto_{t}.png"
+            subprocess.run([chrome, "--headless=new", "--hide-scrollbars",
+                            "--default-background-color=00000000", "--force-device-scale-factor=2",
+                            f"--screenshot={bruto}", "--window-size=404,1400", f"file://{html}"],
+                           capture_output=True, timeout=180)
+            try:
+                from PIL import Image
+                im = Image.open(bruto).convert("RGBA")
+                caja = im.getchannel("A").getbbox()     # la tarjeta es lo unico opaco
+                if caja:
+                    im = im.crop(caja)
+                im.save(f"{AQUI}/popover_{t}.png")
+                log(f"render {t}: {im.size[0] // 2}x{im.size[1] // 2} pt")
+            except Exception as e:
+                log(f"ERROR recorte {t}: {type(e).__name__}: {e}")
+        return f"{AQUI}/popover_{tema or tema_activo()}.png"
+
+    def tamano_del_png(self, ruta):
+        """El PNG ya viene recortado a la tarjeta: su tamano (a 2x) es el del popover."""
         try:
             from PIL import Image
             im = Image.open(ruta)
-            return max(200, min(1300, im.size[1] // 2))
+            return (max(200, im.size[0] // 2), max(200, min(1400, im.size[1] // 2)))
         except Exception:
-            return 664
+            return (384, 664)
 
     def ruta_del_tema(self):
-        """Siempre el tema claro (el popover nativo se ve blanco, como Apple)."""
-        ruta = f"{AQUI}/popover_claro.png"
+        """Claro, oscuro o el que tenga macOS ahora mismo, segun config.json ('tema')."""
+        tema = tema_activo()
+        ruta = f"{AQUI}/popover_{tema}.png"
         if not os.path.exists(ruta):
-            self.render("claro")
+            self.render(tema)
         return ruta
+
     def accion_(self, zona):
         """Lo que hacen los botones del desplegable."""
-        log(f"clic en: {zona}")
+        log(f"clic en: {zona}")   # las zonas se reparten en VistaDesplegable.mouseDown_
         try:
             if zona == "Abrir panel":
-                subprocess.run(["open", "http://127.0.0.1:8765/"], capture_output=True)
+                subprocess.run(["open", f"http://127.0.0.1:{costbar.PUERTO}/"], capture_output=True)
+            elif zona == "Guia":
+                subprocess.run(["open", f"{AQUI}/GUIA.md"], capture_output=True)
             elif zona == "Refrescar":
-                self.render("claro")
+                self.repinta()
+            elif zona.startswith("tema:"):
+                import json
+                c = json.load(open(CONFIG)) if os.path.exists(CONFIG) else {}
+                c["tema"] = zona[5:]
+                json.dump(c, open(CONFIG, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+                self.muestra()          # instantaneo: los dos temas ya estan renderizados
+                NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(0.5, self, "preparaImagenes:", None, False)
             elif zona == "Salir":
                 self.pop.performClose_(None)
         except Exception as e:
             log(f"ERROR accion {type(e).__name__}: {e}")
+
+    def viste_popover(self, tema):
+        """El marco nativo del popover va a juego con el PNG (si no, queda un borde blanco)."""
+        nombre = "NSAppearanceNameDarkAqua" if tema == "oscuro" else "NSAppearanceNameAqua"
+        self.pop.setAppearance_(NSAppearance.appearanceNamed_(nombre))
+
+    def muestra(self):
+        """Pone en el desplegable el PNG del tema activo, al tamano exacto de la tarjeta."""
+        tema = tema_activo()
+        self.viste_popover(tema)
+        ruta = self.ruta_del_tema()
+        ancho, alto = self.tamano_del_png(ruta)
+        self.pop.setContentSize_(NSMakeSize(ancho, alto))
+        self.vista.setFrameSize_(NSMakeSize(ancho, alto))   # solo el tamano: el popover la coloca (con su margen)
+        datos_png = open(ruta, "rb").read()
+        img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos_png, len(datos_png)))
+        img.setSize_((ancho, alto))        # el PNG va a 2x: su tamano en puntos es la mitad
+        self.vista.setImage_(img)
+        return ancho, alto
+
+    def repinta(self):
+        """Refrescar: datos nuevos (escaneo + Chrome, tarda unos segundos) y a la vista."""
+        self.render()
+        self.muestra()
 
     def pulsa_(self, sender):
         import time as _t
@@ -242,13 +339,8 @@ class Barra(NSObject):
             if self.pop.isShown():
                 self.pop.performClose_(sender)
                 return
-            ruta = self.ruta_del_tema()
-            alto = self.alto_del_png(ruta)
-            self.pop.setContentSize_(NSMakeSize(404, alto))
-            self.vista.setFrame_(NSMakeRect(0, 0, 404, alto))
-            datos_png = open(ruta, "rb").read()
-            self.vista.setImage_(NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos_png, len(datos_png))))
-            log(f"imagen del tema puesta ({alto} pt)")
+            ancho, alto = self.muestra()
+            log(f"imagen del tema puesta ({ancho}x{alto} pt)")
             boton = self.item.button()
             self.pop.showRelativeToRect_ofView_preferredEdge_(boton.bounds(), boton, 1)
             log(f"desplegable mostrado en {_t.time()-_t0:.2f} s")
@@ -259,7 +351,9 @@ class Barra(NSObject):
     def preparaImagenes_(self, _=None):
         """Los PNG de los dos temas, en segundo plano (para que el clic sea instantaneo)."""
         try:
-            self.render("claro")
+            self.render()
+            if getattr(self, "pop", None) is not None and self.pop.isShown():
+                self.muestra()          # si esta abierto, que luzca lo recien renderizado
         except Exception as e:
             log(f"ERROR render {type(e).__name__}: {e}")
 
@@ -289,6 +383,7 @@ def main():
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     barra = Barra.alloc().init()
+    costbar.servir()          # el panel y su configurador, en un hilo aparte
     if "--abre" in sys.argv:
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(1.5, barra, "pulsa:", None, False)
     log("entrando en el bucle")

@@ -1,5 +1,6 @@
 {
   "_nota": "El plan se detecta solo del log (providerID de OpenCode, URL base de Hermes). Aqui: renombrar con aliases, y poner cuotas (limite_5h_tokens / limite_semana_tokens) para ver el %.",
+  "tema": "sistema",
   "limite_hora_tokens": 8000000,
   "ignorar": [
     "synthetic",

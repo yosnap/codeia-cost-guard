@@ -1,4 +1,7 @@
 panel.html
+popover.html
+popover_oscuro.html
+popover_*.png
 __pycache__/
 *.pyc
 state.json

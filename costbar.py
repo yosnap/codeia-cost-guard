@@ -35,6 +35,7 @@ TARIFAS = {
     "gpt-5.6": (5, 30, .50, 6.25),
 }
 CLIFF = 272_000
+PUERTO = 47391              # panel/configurador local: un puerto alto que casi nada usa
 
 
 def corto(m):
@@ -775,7 +776,7 @@ def informa(r):
 
 
 def servir():
-    """Sirve el panel en http://127.0.0.1:8765 y guarda la configuracion que envies desde el.
+    """Sirve el panel en http://127.0.0.1:PUERTO y guarda la configuracion que envies desde el.
 
     Asi no hay que editar ficheros a mano: el propio panel tiene el configurador.
     """
@@ -799,6 +800,8 @@ def servir():
             ruta = self.path.split("?")[0]
             if ruta in ("/", "/panel.html"):
                 try:
+                    # se regenera al abrir: asi el panel siempre lleva los datos de ahora
+                    subprocess.run([sys.executable, f"{base}/panel.py"], capture_output=True, timeout=120)
                     self._manda(200, open(f"{base}/panel.html", "rb").read(), "text/html; charset=utf-8")
                 except Exception as e:
                     self._manda(500, str(e).encode(), "text/plain")
@@ -843,9 +846,9 @@ def servir():
         daemon_threads = True
 
     try:
-        srv = S(("127.0.0.1", 8765), H)
+        srv = S(("127.0.0.1", PUERTO), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        log(f"configurador listo en http://127.0.0.1:8765")
+        log(f"configurador listo en http://127.0.0.1:{PUERTO}")
     except OSError as e:
         log(f"configurador no disponible: {e}")
 

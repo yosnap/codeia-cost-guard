@@ -1,8 +1,9 @@
 {
+  "tema": "sistema",
   "limite_hora_tokens": 8000000,
   "limite_5h_tokens": 0,
   "limite_semana_tokens": 0,
-  "_nota": "Los limites salen de la informacion publica de cada proveedor (campo fuente). tipo: suscripcion = cuota que se agota; pago_por_uso = se paga lo que se gasta (ahi no hay cuota, cuenta el dinero).",
+  "_nota": "Los limites salen de la informacion publica de cada proveedor (campo fuente). tipo: suscripcion = cuota que se agota; pago_por_uso = se paga lo que se gasta (ahi no hay cuota, cuenta el dinero). tema: claro / oscuro / sistema (detecta la apariencia de macOS).",
   "ignorar": [
     "synthetic",
     "<synthetic>",

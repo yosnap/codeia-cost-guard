@@ -10,9 +10,11 @@ REGLAS=0; [ "${1:-}" = "--reglas" ] && REGLAS=1
 echo "-> Copiando a $DESTINO"
 mkdir -p "$DESTINO/logs"
 for f in costbar.py barra.py popover.py panel.py costbar.css analizar_gasto.py \
-         precio_astra.py instalar_reglas_globales.py config.json GUIA.md AGENTS-snippet.md; do
+         precio_astra.py instalar_reglas_globales.py GUIA.md AGENTS-snippet.md; do
   [ -f "$AQUI/$f" ] && cp "$AQUI/$f" "$DESTINO/$f"
 done
+# config.json no se pisa: si ya existe trae tus cuotas y notas por proveedor (como state.json)
+[ -f "$DESTINO/config.json" ] || cp "$AQUI/config.json" "$DESTINO/config.json"
 [ -f "$DESTINO/state.json" ] || echo "{}" > "$DESTINO/state.json"
 
 if [ "$(uname -s)" = "Darwin" ]; then
