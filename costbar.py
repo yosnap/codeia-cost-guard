@@ -259,10 +259,22 @@ def parsear(ruta):
 
 
 def leer_bases():
-    """OpenCode y Hermes no escriben .jsonl: guardan el consumo en SQLite."""
-    dia = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))
-    turnos = collections.defaultdict(int)
-    horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)})
+    """OpenCode y Hermes no escriben .jsonl: guardan el consumo en SQLite.
+
+    Devuelve {proyecto: {dia, turnos, horas}} para que cada aplicacion y cada proyecto cuenten
+    por separado (Hermes entra como proyecto, no como plan).
+    """
+    proyectos = {}
+
+    def saca(proyecto):
+        if proyecto not in proyectos:
+            proyectos[proyecto] = {
+                "dia": collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0])),
+                "turnos": collections.defaultdict(int),
+                "horas": collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)}),
+            }
+        return proyectos[proyecto]
+
     nombres = []
 
     def limpia_modelo(m):
@@ -275,24 +287,25 @@ def leer_bases():
                 pass
         return m.strip()
 
-    def mete(ts, modelo, gi, go, cr, cw):
-        modelo = limpia_modelo(modelo)
+    def mete(proyecto, ts, modelo, gi, go, cr, cw):
         if not ts or len(str(ts)) < 10:
             return
         ts = str(ts)
-        k = modelo or "sin-modelo"
-        a = dia[ts[:10]][k]
+        proy = saca(proyecto or "Hermes/OpenCode")
+        k = limpia_modelo(modelo) or "sin-modelo"
+        a = proy["dia"][ts[:10]][k]
         a[0] += gi; a[1] += go; a[2] += cr; a[3] += cw
-        turnos[ts[:10]] += 1
+        proy["turnos"][ts[:10]] += 1
         if len(ts) >= 13:
             tok = gi + go + cr + cw
-            horas[ts[:13]]["tok"] += tok
-            horas[ts[:13]]["mod"][k] += tok
+            proy["horas"][ts[:13]]["tok"] += tok
+            proy["horas"][ts[:13]]["mod"][k] += tok
             tr = tarifa(k)
             if tr:
                 over = gi > CLIFF
-                horas[ts[:13]]["usd"] += (max(gi - cr, 0) * tr[0] * (2 if over else 1) + cr * tr[2] * (2 if over else 1)
-                                          + cw * tr[3] * (2 if over else 1) + go * tr[1] * (1.5 if over else 1)) / 1e6
+                proy["horas"][ts[:13]]["usd"] += (max(gi - cr, 0) * tr[0] * (2 if over else 1)
+                                                  + cr * tr[2] * (2 if over else 1) + cw * tr[3] * (2 if over else 1)
+                                                  + go * tr[1] * (1.5 if over else 1)) / 1e6
 
     def hora(v):
         v = v or 0
@@ -300,34 +313,37 @@ def leer_bases():
             v /= 1000
         return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(v)) if v else ""
 
-    # OpenCode
+    def ultimos(partes, n=2):
+        trozos = [x for x in (partes or "").split("/") if x]
+        return "/".join(trozos[-n:]) if trozos else ""
+
+    # OpenCode: cada sesion lleva su directorio
     for ruta in (f"{HOME}/.local/share/opencode/opencode.db", f"{HOME}/.local/share/opencode/opencode-.db"):
         if not os.path.exists(ruta):
             continue
         try:
             con = sqlite3.connect(f"file:{ruta}?mode=ro", uri=True)
-            filas = list(con.execute("select model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created from session"))
+            filas = list(con.execute("select model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, directory from session"))
             con.close()
-            for m, ti, to, tcr, tcw, creado in filas:
-                mete(hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0)
+            for m, ti, to, tcr, tcw, creado, direc in filas:
+                mete(f"OpenCode · {ultimos(direc) or 'sin proyecto'}", hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0)
             nombres.append(f"OpenCode ({len(filas)})")
             break
         except Exception as e:
             log(f"opencode {ruta}: {type(e).__name__}: {e}")
-    # Hermes (todos los perfiles)
+    # Hermes: su cwd es el proyecto (Hermes no es un plan, es la app)
     for db in sorted(glob.glob(f"{HOME}/.hermes/profiles/*/state.db")):
         try:
             perfil = db.split("/profiles/")[-1].split("/")[0]
             con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-            filas = list(con.execute("select model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at from sessions"))
+            filas = list(con.execute("select model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at, cwd from sessions"))
             con.close()
-            for m, i, o, cr, cw, ini in filas:
-                mete(hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
+            for m, i, o, cr, cw, ini, cwd in filas:
+                mete(f"Hermes/{perfil}" + (f" · {ultimos(cwd, 1)}" if cwd else ""), hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
             nombres.append(f"Hermes/{perfil} ({len(filas)})")
         except Exception as e:
             log(f"hermes {db}: {type(e).__name__}: {e}")
-    return ({"dia": {k: {m: v for m, v in d.items()} for k, d in dia.items()},
-             "turnos": dict(turnos), "horas": dict(horas), "proyecto": "Hermes/OpenCode"}, nombres)
+    return proyectos, nombres
 
 
 def escanear():
@@ -351,9 +367,11 @@ def escanear():
                 r["clave"] = clave
                 vistos[f] = r
                 nuevos += 1
-    bases, nombres_bases = leer_bases()
-    bases["clave"] = "bases"
-    vistos["sqlite:opencode+hermes"] = bases
+    proyectos_base, nombres_bases = leer_bases()
+    for proy, datos in proyectos_base.items():
+        datos["proyecto"] = proy
+        datos["clave"] = "bases"
+        vistos[f"sqlite:{proy}"] = datos
     estado["ficheros"] = vistos
     guardar_estado(estado)
     r = agregar(vistos, nuevos)
@@ -391,11 +409,14 @@ def agregar(vistos, nuevos=0):
     proy_prov = collections.defaultdict(lambda: collections.defaultdict(int))
     modelo_prov = {}
     ahora = time.time()
+    ignora = [str(x).lower() for x in (cfg().get("ignorar") or ["synthetic", "<synthetic>", "sin-modelo"])]
     for f, r in vistos.items():
         for d, mods in r.get("dia", {}).items():
             if not d or d < desde:
                 continue
             for m, v in mods.items():
+                if any(x in (m or "").lower() for x in ignora):
+                    continue
                 suma(dias[d], v)
                 t = tarifa(m)
                 if t:

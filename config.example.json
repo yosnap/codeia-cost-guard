@@ -1,6 +1,11 @@
 {
-  "_nota": "Cada plan tiene su cuota. Pon limite_5h_tokens y limite_semana_tokens cuando los sepas (0 = sin declarar) y veras el % en el icono y en el panel.",
+  "_nota": "Un plan por cuota. 'modelos' agrupa por trozos del nombre del modelo; 'ignorar' quita ruido. Pon limite_5h_tokens / limite_semana_tokens y veras el % consumido.",
   "limite_hora_tokens": 8000000,
+  "ignorar": [
+    "synthetic",
+    "<synthetic>",
+    "sin-modelo"
+  ],
   "proveedores": [
     {
       "nombre": "Claude (Max)",
@@ -26,7 +31,7 @@
       "limite_semana_tokens": 0
     },
     {
-      "nombre": "z.ai (GLM)",
+      "nombre": "OpenCode",
       "modelos": [
         "glm"
       ],
@@ -36,6 +41,7 @@
     {
       "nombre": "NaN",
       "modelos": [
+        "mimo",
         "gemma",
         "nan"
       ],
@@ -45,8 +51,15 @@
     {
       "nombre": "nodeclub.ai",
       "modelos": [
-        "qwen",
-        "deepseek"
+        "qwen"
+      ],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "OpenRouter",
+      "modelos": [
+        "nemotron"
       ],
       "limite_5h_tokens": 0,
       "limite_semana_tokens": 0
