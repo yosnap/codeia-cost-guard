@@ -42,7 +42,10 @@ PLANTILLA = """<!doctype html><html lang="es" data-tema="claro"><head><meta char
  :root{--marca:#ae00ff;--marca2:#ff008c}
  *{box-sizing:border-box}
  body{margin:0;padding:26px;background:var(--fondo);color:var(--texto);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,sans-serif}
- .cab{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+ .cab{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+ #tema{font-size:12.5px;padding:6px 12px;color:var(--suave)}
+ #tema:hover{color:var(--texto)}
+ th .f{opacity:.35;font-size:10px} th.act{color:var(--marca)} th.act .f{opacity:1}
  h1{font-size:20px;margin:0 0 4px} .sub{color:var(--suave);font-size:12.5px}
  button{font:inherit;font-size:13px;padding:7px 12px;border-radius:10px;border:1px solid var(--borde);background:var(--panel);color:var(--texto);cursor:pointer}
  button:hover{border-color:var(--marca)} button.on{background:linear-gradient(90deg,var(--marca),var(--marca2));color:#fff;border-color:transparent}
@@ -76,6 +79,7 @@ PLANTILLA = """<!doctype html><html lang="es" data-tema="claro"><head><meta char
 <div class="fila-b" id="f-plan"></div>
 <div class="rejilla" id="kpis"></div>
 <div class="rejilla" id="detalle"></div>
+<div id="fuentes"></div>
 <div id="tablas"></div>
 <footer id="pie"></footer>
 <script>
@@ -87,6 +91,12 @@ function fmt(n){n=Number(n)||0;
   if(n>=1e6)return (n/1e6).toFixed(1).replace(".",",")+" M";
   if(n>=1e3)return (n/1e3).toFixed(0)+" K"; return String(Math.round(n));}
 const dias = Object.keys(D.dias);
+const DIASEM = ["dom","lun","mar","mie","jue","vie","sab"];
+function etiquetaDia(d){ const hoy=dias[dias.length-1], ayer=dias[dias.length-2];
+  if(d===hoy) return "hoy";
+  if(d===ayer) return "ayer";
+  const x = new Date(d+"T12:00:00");
+  return DIASEM[x.getDay()]+" "+d.slice(8); }
 const col = i => ["#ae00ff","#ff008c","#12b886","#4c6ef5","#f59f00","#e8590c","#0ca678","#7048e8","#d6336c","#1098ad"][i%10];
 const planes = () => Object.keys(D.proveedores);
 function cambiarTema(){const r=document.documentElement,n=r.getAttribute("data-tema")==="claro"?"oscuro":"claro";
@@ -140,7 +150,9 @@ function pintarFiltros(){
     [`<button class="${plan==="todos"?"on":""}" onclick="setPlan('todos')">Todos</button>`].concat(
       planes().map(p => `<button class="${plan===p?"on":""}" onclick="setPlan('${p.replace(/'/g,"")}')">${p}</button>`)).join("");
 }
-function setPeriodo(p){periodo=p;pintar();} function setPlan(p){plan=p;pintar();}
+function opcionesDias(){ if(periodo==="hoy") return [1]; if(periodo==="semana") return [5,7]; return [5,10,15,30]; }
+function setPeriodo(p){ periodo=p; diasVer=Math.min(diasVer, opcionesDias().slice(-1)[0]); pintar(); }
+function setPlan(p){plan=p;pintar();}
 function setDias(n){diasVer=n;pintar();}
 function setOrden(k){orden = (orden[0]===k) ? [k,-orden[1]] : [k,-1]; pintar();}
 
@@ -179,8 +191,9 @@ function tablaPlanes(){
     const v = x => k==="nombre" ? x[0].toLowerCase() : (x[1][k]||0);
     return (v(a) > v(b) ? 1 : v(a) < v(b) ? -1 : 0) * s; });
   const cab = [["nombre","Plan"],["cinco_h","5 h"],["semana","Semana"],["mes","Mes"],["hoy","Hoy"]];
-  return `<section><h2>Por plan (proveedor) · ordena pulsando la cabecera</h2><table>
-  <tr>${cab.map(c=>`<th onclick="setOrden('${c[0]}')">${c[1]}${orden[0]===c[0]?(orden[1]<0?" ↓":" ↑"):""}</th>`).join("")}<th>Modelos</th></tr>
+  return `<section><h2>Por plan (proveedor) <span style="text-transform:none;letter-spacing:0">· pulsa una cabecera para ordenar</span></h2><table>
+  <tr>${cab.map(c=>{const act=orden[0]===c[0];const f=act?(orden[1]<0?"▼":"▲"):"↕";
+    return `<th class="${act?"act":""}" onclick="setOrden('${c[0]}')">${c[1]} <span class="f">${f}</span></th>`;}).join("")}<th>Modelos</th></tr>
   ${filas.map(([n,x],i)=>`<tr><td><span class="punto" style="background:${col(i)}"></span>${n}${x.auto?"<span class='auto'>auto</span>":""}</td>
     <td>${fmt(x.cinco_h)}${x.pct_5h?" ("+x.pct_5h+" %)":""}</td><td>${fmt(x.semana)}${x.pct_semana?" ("+x.pct_semana+" %)":""}</td>
     <td>${fmt(x.mes)}</td><td>${fmt(x.hoy)}</td><td style="color:var(--suave);font-size:11.5px">${(x.modelos||[]).join(", ")||"-"}</td></tr>`).join("")}
@@ -207,7 +220,7 @@ function tablaMatriz(){
     let t=0; const ps = plan==="todos"?planes():[plan];
     ps.forEach(p => { const v=((D.cruce[p]||{})[m]||{})[d]; if(v) t+=v; }); return t;
   }
-  const cab = "<tr><th>Modelo</th>"+ult.map(d=>`<th onclick="setDias(${diasVer})">${d.slice(8)}</th>`).join("")+`<th>Total ${plan==="todos"?"":"("+plan+")"}</th></tr>`;
+  const cab = "<tr><th>Modelo</th>"+ult.map(d=>`<th>${d.slice(8)}</th>`).join("")+`<th>Total ${plan==="todos"?"":"("+plan+")"}</th></tr>`;
   const filas = modelos.map(m => {
     const celdas = ult.map(d => { const v=diaModelo(m,d), f=max?v/max:0;
       const st = v?`background:rgba(174,0,255,${(0.12+f*0.8).toFixed(2)});color:${f>0.55?"#fff":"var(--texto)"}`:"";
@@ -229,11 +242,23 @@ function tablaProyectos(){
   return `<section><h2>Por proyecto · ${plan==="todos"?"todos":plan}${plan==="todos"?" (30 dias)":" (30 dias)"}</h2>${barras(datos)}</section>`;
 }
 
+function pintarFuentes(){
+  const b = D.bases || [];
+  document.getElementById("fuentes").innerHTML = `<section><h2>De donde salen los datos</h2>
+    <p class="sub" style="margin:0 0 8px">${D.fuentes} ficheros de log (Claude Code, Codex) + estas bases de datos:</p>
+    ${b.length ? b.map(x=>`<div class="fila"><span class="et">${x.split(" (")[0]}</span><span class="pista"><span class="barra" style="width:100%;opacity:.25"></span></span><span class="val">${(x.match(/\((\d+)\)/)||[])[1]||""} sesiones</span></div>`).join("")
+      : "<p class='vacio'>sin bases de datos detectadas</p>"}
+    </section>`;
+}
 function pintar(){
-  pintarFiltros(); pintarKpis();
-  const serie = Object.entries(porDia()).sort().map(([d,v])=>[d.slice(5),v]);
+  pintarFiltros(); pintarKpis(); pintarFuentes();
+  const nver = Math.min(diasVer, diasPeriodo().length);
+  const serie = Object.entries(porDia()).sort().slice(-nver).map(([d,v])=>[etiquetaDia(d),v]);
+  const ops = opcionesDias();
   const control = `<div class="fila-b"><span class="etq">Dias en el grafico</span>` +
-    [5,10,15,30].map(n=>`<button class="${diasVer===n?"on":""}" onclick="setDias(${n})">${n}</button>`).join("") + `</div>`;
+    (ops.length===1 ? `<button class="on" disabled>solo hoy</button>`
+      : ops.map(n=>`<button class="${nver===n?"on":""}" onclick="setDias(${n})">${n}</button>`).join("")) +
+    `<span class="sub" style="margin-left:6px">(el periodo elige el maximo)</span></div>`;
   document.getElementById("tablas").innerHTML = tablaPlanes() +
     `<section>${control}<h2>Por dia (tokens)</h2>${barras(serie)}</section>` +
     tablaModelos() + tablaMatriz() + tablaProyectos();

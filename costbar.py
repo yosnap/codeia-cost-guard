@@ -50,10 +50,11 @@ PROVEEDORES_DEFECTO = [
 
 
 def familia_de(m):
-    """glm5.3-flash -> glm · qwen3.8-27b -> qwen · claude-sonnet-5 -> claude"""
-    m = corto(m or "")
+    """glm5.3-flash -> glm · qwen3.8-27b -> qwen · <synthetic> -> synthetic · sin-modelo -> otros"""
+    m = re.sub(r"[^a-z0-9_.-]", "", corto(m or "").lower())
     g = re.match(r"[a-z]+", m)
-    return g.group(0) if g else m
+    fam = g.group(0) if g else "otros"
+    return "otros" if fam in ("sin", "the", "") else fam
 
 
 def proveedores_de(c, modelos=()):
