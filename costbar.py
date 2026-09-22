@@ -642,6 +642,14 @@ def agregar(vistos, nuevos=0):
     for _m, _d in _tok.items():
         if _d:
             modelo_prov[_m] = max(_d, key=_d.get)
+    for _n, _pr in (provs_out or {}).items():
+        _cf = next((x for x in (cfg().get("proveedores") or []) if x["nombre"] == _n), {})
+        _t5 = next((v for kk, v in _pr.items() if isinstance(v, (int, float)) and ("5h" in kk.lower() or "cinco" in kk.lower())), 0)
+        _ts = next((v for kk, v in _pr.items() if isinstance(v, (int, float)) and "semana" in kk.lower()), 0)
+        _l5, _ls = _cf.get("limite_5h_tokens") or 0, _cf.get("limite_semana_tokens") or 0
+        _pr["tipo"] = _cf.get("tipo") or ("suscripcion" if (_l5 or _ls) else "pago_por_uso")
+        _pr["pct_5h"] = round(100.0 * _t5 / _l5, 1) if _l5 else 0
+        _pr["pct_semana"] = round(100.0 * _ts / _ls, 1) if _ls else 0
     return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana, "mes": mes,
             "modelos_mes": dict(modelos_mes),
             "modelo_dia": {m: dict(v) for m, v in modelo_dia.items()},

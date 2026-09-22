@@ -1,5 +1,5 @@
 {
-  "_nota": "El plan se detecta solo del log (providerID de OpenCode, URL base de Hermes). Aqui: renombrar con aliases, y poner cuotas (limite_5h_tokens / limite_semana_tokens) para ver el %.",
+  "_nota": "Los limites salen de la informacion publica de cada proveedor (campo fuente). tipo: suscripcion = cuota que se agota; pago_por_uso = se paga lo que se gasta (ahi no hay cuota, cuenta el dinero).",
   "limite_hora_tokens": 8000000,
   "ignorar": [
     "synthetic",
@@ -18,7 +18,8 @@
     "gemma": "NaN",
     "qwen": "nodeclub.ai",
     "nemotron": "OpenRouter",
-    "deepseek": "NaN"
+    "deepseek": "NaN",
+    "mimo": "OpenCode Go"
   },
   "proveedores": [
     {
@@ -31,7 +32,10 @@
         "fable"
       ],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "suscripcion",
+      "fuente": "https://claude.com/pricing",
+      "nota": "Anthropic no publica cifras de tokens: ventana de 5 h + tope semanal, todo (web, Claude Code) del mismo pozo. Max = 5x o 20x Pro."
     },
     {
       "nombre": "OpenAI (Codex)",
@@ -42,43 +46,68 @@
         "codex"
       ],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "suscripcion",
+      "fuente": "https://developers.openai.com/codex/pricing",
+      "nota": "Publicado en mensajes, no tokens: Plus = 15-80 mensajes locales/5 h segun modelo, mas tope semanal. Compartido web+CLI+IDE."
     },
     {
       "nombre": "NaN",
       "modelos": [],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "suscripcion",
+      "limite_mes_tokens": 0,
+      "fuente": "https://nan.builders/",
+      "nota": "Membresia de inferencia de 70 EUR/mes (NaN Builders). La cuota de tokens no esta publicada: fuera del cluster premium no hay contador; dentro, el tope es el mensual que marque la membresia."
     },
     {
       "nombre": "OpenCode Go",
       "modelos": [],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "suscripcion",
+      "limite_5h_usd": 12,
+      "limite_semana_usd": 30,
+      "limite_mes_usd": 60,
+      "fuente": "https://opencode.ai/docs/go/",
+      "nota": "Su cuota va en DOLARES y por modelo: 5 h = 20 %, semana = 50 %, mes = 100 % del tope mensual de cada modelo ($15-$100). Los 12/30/60 son del caso tipico."
     },
     {
       "nombre": "OpenRouter",
       "modelos": [],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "pago_por_uso",
+      "fuente": "https://openrouter.ai/",
+      "nota": "Credito prepago: se paga por token, no hay cuota que se agote. Cuenta lo gastado."
     },
     {
       "nombre": "z.ai (coding plan)",
       "modelos": [],
-      "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_5h_tokens": 60000000,
+      "limite_semana_tokens": 300000000,
+      "tipo": "suscripcion",
+      "fuente": "https://docs.z.ai/devpack/notice/usage-revision",
+      "nota": "Plan estandar (asiento Standard): 60 M/5 h y 300 M/semana. Premium: 160 M/800 M. GLM-5.3 gasta 3x en hora punta (14-18h UTC+8)."
     },
     {
       "nombre": "nodeclub.ai",
       "modelos": [],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "pago_por_uso",
+      "fuente": "",
+      "nota": "Sin informacion publica de precios ni de limites; queda pendiente."
     },
     {
       "nombre": "CheaperInference",
       "modelos": [],
       "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
+      "limite_semana_tokens": 0,
+      "tipo": "pago_por_uso",
+      "fuente": "https://www.cheaperinference.com/",
+      "nota": "Pago por uso desde 5 $, sin compromiso mensual. Descuentos del 40-60 % sobre lista (glm-5.3-flash 55 %, gpt-5.6-luna 60 %, deepseek-v4-flash 41 %). Nunca por encima del precio de lista."
     }
   ]
 }
