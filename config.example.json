@@ -17,7 +17,8 @@
     "glm": "NaN",
     "gemma": "NaN",
     "qwen": "nodeclub.ai",
-    "nemotron": "OpenRouter"
+    "nemotron": "OpenRouter",
+    "deepseek": "NaN"
   },
   "proveedores": [
     {
