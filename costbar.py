@@ -21,9 +21,9 @@ STATE = f"{AQUI}/state.json"
 CONFIG = f"{AQUI}/config.json"
 LOG = f"{AQUI}/logs/costbar.log"
 FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions", f"{HOME}/.local/share/opencode"]
-DIAS = 7
+DIAS = 31
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
-VERSION_ESTADO = 6          # subir cuando cambie el formato del cache: obliga a reescanear
+VERSION_ESTADO = 7          # subir cuando cambie el formato del cache: obliga a reescanear
 
 # tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache) — solo para el equivalente API
 TARIFAS = {
@@ -89,6 +89,25 @@ def fmt_tok(n):
         if n >= corte:
             return f"{n / corte:.1f} {sufijo}".replace(".", ",")
     return str(int(n))
+
+
+def icono_png(destino, fraccion):
+    """Dibuja la barra de la barra de menus: relleno degradado segun la ventana de 5 h."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    W, H = 46, 20
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 0, W - 1, H - 1], radius=5, fill=(150, 140, 175, 60))
+    relleno = int((W - 4) * max(0.0, min(fraccion, 1.0)))
+    for x in range(relleno):
+        f = x / max(relleno - 1, 1)
+        c = tuple(int(a + (b - a) * f) for a, b in ((0xAE, 0xFF), (0x00, 0x00), (0xFF, 0x8C)))
+        d.line([(2 + x, 3), (2 + x, H - 4)], fill=c + (255,))
+    im.save(destino)
+    return destino
 
 
 def log(msg):
@@ -258,13 +277,17 @@ def agregar(vistos, nuevos=0):
     hoy = time.strftime("%Y-%m-%d")
     ayer = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
     desde = time.strftime("%Y-%m-%d", time.localtime(time.time() - DIAS * 86400))
+    hace7 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 6 * 86400))
+    hace30 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 29 * 86400))
     dias = collections.defaultdict(vacio)
     modelos_hoy = collections.defaultdict(vacio)
+    modelos_mes = collections.defaultdict(vacio)
+    modelo_dia = collections.defaultdict(lambda: collections.defaultdict(int))
     proys = collections.defaultdict(vacio)
     ritmo = {"tok": 0, "usd": 0.0}
     cinco = {"tok": 0, "usd": 0.0, "fam": collections.defaultdict(int)}
     provs = proveedores_de(cfg())
-    por_prov = collections.defaultdict(lambda: {"cinco_h": 0, "semana": 0, "hoy": 0, "modelos": set()})
+    por_prov = collections.defaultdict(lambda: {"cinco_h": 0, "semana": 0, "hoy": 0, "mes": 0, "modelos": set()})
     ahora = time.time()
     for f, r in vistos.items():
         for d, mods in r.get("dia", {}).items():
@@ -278,6 +301,9 @@ def agregar(vistos, nuevos=0):
                     dias[d]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
                                        + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                        + v[1] * t[1] * (1.5 if over else 1)) / 1e6
+                if d >= hace30:
+                    suma(modelos_mes[m], v)
+                    modelo_dia[m][d] += v[0] + v[1] + v[2] + v[3]
                 if d == hoy:
                     suma(modelos_hoy[m], v)
                     if t:
@@ -289,7 +315,10 @@ def agregar(vistos, nuevos=0):
                 pp = por_prov[proveedor_de(m, provs)]
                 pp["modelos"].add(corto(m))
                 tokv = v[0] + v[1] + v[2] + v[3]
-                pp["semana"] += tokv
+                if d >= hace7:
+                    pp["semana"] += tokv
+                if d >= hace30:
+                    pp["mes"] += tokv
                 if d == hoy:
                     pp["hoy"] += tokv
         for d, n in r.get("turnos", {}).items():
@@ -326,13 +355,22 @@ def agregar(vistos, nuevos=0):
     provs_out = {}
     for n, x in sorted(por_prov.items(), key=lambda kv: -kv[1]["cinco_h"]):
         l5, ls = lim_prov.get(n, (0, 0))
-        provs_out[n] = {"cinco_h": x["cinco_h"], "semana": x["semana"], "hoy": x["hoy"],
+        provs_out[n] = {"cinco_h": x["cinco_h"], "semana": x["semana"], "hoy": x["hoy"], "mes": x["mes"],
                         "modelos": sorted(x["modelos"]),
                         "pct_5h": (x["cinco_h"] / l5 * 100) if l5 else 0.0,
                         "pct_semana": (x["semana"] / ls * 100) if ls else 0.0}
-    semana = {k: sum(dias[d][k] for d in dias if d) for k in ("gi", "go", "cr", "cw", "tok", "turnos")}
-    semana["usd"] = sum(dias[d]["usd"] for d in dias if d)
-    return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana,
+    def agrega(filtro):
+        acc = collections.defaultdict(float)
+        for d, x in dias.items():
+            if d and filtro(d):
+                for k in ("gi", "go", "cr", "cw", "tok", "turnos", "usd"):
+                    acc[k] += x[k]
+        return dict(acc)
+    semana = agrega(lambda d: d >= hace7)
+    mes = agrega(lambda d: d >= hace30)
+    return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana, "mes": mes,
+            "modelos_mes": dict(modelos_mes),
+            "modelo_dia": {m: dict(v) for m, v in modelo_dia.items()},
             "ritmo": ritmo, "cinco_h": {"tok": cinco["tok"], "usd": cinco["usd"], "fam": dict(cinco["fam"])},
             "pct_5h": (cinco["tok"] / lim5 * 100) if lim5 else 0.0,
             "pct_semana": (semana["tok"] / limsem * 100) if limsem else 0.0,
@@ -397,8 +435,16 @@ def main():
             except Exception as e:
                 log(f"ERROR panel: {type(e).__name__}: {e}")
 
+        def copia(self, texto):
+            def _f(_):
+                try:
+                    subprocess.run(["pbcopy"], input=texto.encode())
+                except Exception:
+                    pass
+            return _f
+
         def _item(self, titulo):
-            it = rumps.MenuItem(titulo)
+            it = rumps.MenuItem(titulo, callback=self.copia(titulo))
             self.menu.add(it)
             return it
 
@@ -409,6 +455,11 @@ def main():
                 h, c5 = r["hoy"], r["cinco_h"]
                 lim5 = r["limites"].get("limite_5h_tokens") or 0
                 alto = r["ritmo"]["tok"] >= r["limites"]["limite_hora_tokens"]
+                lim5v = lim5 or 0
+                fraccion = (c5["tok"] / lim5v) if lim5v else (r["ritmo"]["tok"] / (r["limites"]["limite_hora_tokens"] or 1) or 0.34)
+                icono = icono_png(os.path.join(AQUI, "icono.png"), fraccion)
+                if icono:
+                    self.icon = icono
                 self.title = fmt_tok(c5["tok"]) + (" !" if alto else "")
                 self.menu.clear()
                 m = self._item

@@ -53,6 +53,13 @@ ahorro en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md`: `./install.sh --reglas`.
 - **Ritmo de la última hora**, con aviso si pasa del límite.
 - Por día, por modelo y por proyecto.
 
+## Panel
+
+Modo claro y oscuro con un boton (recuerda tu eleccion), filtros por periodo (5 h / hoy / mes) y por
+plan, tarjetas de 5 h, hoy, semana y mes, barras por dia y por proyecto, y una matriz
+**modelo x dia** para ver que modelo consume cada dia. Todo el calculo va en Python y los datos se
+embuten en el HTML: sin red, sin dependencias, sin librerias de graficos.
+
 ## Configurar tus planes (proveedores)
 
 Los logs dicen qué modelo se usó, nunca qué cuota tienes: eso solo lo sabe tu proveedor. Declara cada
