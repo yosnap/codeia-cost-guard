@@ -8,6 +8,58 @@ import costbar
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 SALIDA = f"{AQUI}/panel.html"
+SECCION_CFG = """
+<details class="tarjeta" id="caja-cfg" style="margin-top:18px">
+  <summary style="cursor:pointer;font-weight:600;font-size:1.05rem">Configurar planes y límites</summary>
+  <p style="opacity:.75;margin:.6rem 0 1rem">A la izquierda, lo que dice el log. A la derecha, con qué plan y con qué cuota lo cuentas tú.
+  Guarda y la app lo aplica sola en el siguiente refresco.</p>
+  <table id="tabla-cfg" style="width:100%;border-collapse:collapse"></table>
+  <div style="margin-top:1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+    <button onclick="guardarCfg()" style="padding:.5rem 1.1rem;border-radius:8px;border:0;background:#ae00ff;color:#fff;font-weight:600;cursor:pointer">Guardar</button>
+    <span id="aviso-cfg" style="font-size:.9rem"></span>
+  </div>
+  <h4 style="margin:1.4rem 0 .4rem">Cuotas por plan (en tokens; 0 = sin declarar)</h4>
+  <table id="tabla-lim" style="width:100%;border-collapse:collapse"></table>
+</details>
+<script>
+let CFG = null;
+function fmtTok(v){ v=+v||0; const u=["","K","M","B"]; let i=0; while(v>=1000&&i<3){v/=1000;i++;} return (i?v.toFixed(1):v)+" "+u[i]; }
+function pintaCfg(){
+  fetch("/origenes").then(r=>r.json()).then(d=>{
+    CFG = d.config || {aliases:{},proveedores:[]};
+    CFG.aliases = CFG.aliases || {};
+    const filas = Object.entries(d.origenes||{}).sort((a,b)=>b[1]-a[1]);
+    document.getElementById("tabla-cfg").innerHTML =
+      "<tr><th style='text-align:left'>Origen (según el log)</th><th style='text-align:right'>Tokens 30 d</th><th style='text-align:left'>Plan al que pertenece</th></tr>" +
+      filas.map(([k,v])=>`<tr><td><code>${k}</code></td><td style="text-align:right">${fmtTok(v)}</td>
+        <td><input class="cfg-in" data-k="${k}" value="${(CFG.aliases[k]||"").replace(/"/g,"&quot;")}" placeholder="p. ej. NaN, OpenCode Go, z.ai" style="width:100%;padding:.35rem;border-radius:6px;border:1px solid #bbb"></td></tr>`).join("");
+    document.getElementById("tabla-lim").innerHTML =
+      "<tr><th style='text-align:left'>Plan</th><th style='text-align:right'>Límite 5 h</th><th style='text-align:right'>Límite semanal</th></tr>" +
+      (CFG.proveedores||[]).map(pr=>`<tr><td>${pr.nombre}</td>
+        <td style="text-align:right"><input class="lim-in" data-p="${pr.nombre}" data-c="limite_5h_tokens" value="${pr.limite_5h_tokens||0}" style="width:9rem;padding:.3rem;border-radius:6px;border:1px solid #bbb"></td>
+        <td style="text-align:right"><input class="lim-in" data-p="${pr.nombre}" data-c="limite_semana_tokens" value="${pr.limite_semana_tokens||0}" style="width:9rem;padding:.3rem;border-radius:6px;border:1px solid #bbb"></td></tr>`).join("");
+  }).catch(e=>{ document.getElementById("aviso-cfg").textContent = "No pude leer la configuración: "+e; });
+}
+function guardarCfg(){
+  if(!CFG){ return; }
+  document.querySelectorAll(".cfg-in").forEach(i=>{ CFG.aliases[i.dataset.k] = i.value.trim(); });
+  document.querySelectorAll(".lim-in").forEach(i=>{
+    const pr = (CFG.proveedores||[]).find(x=>x.nombre===i.dataset.p); if(pr){ pr[i.dataset.c] = parseInt(i.value||0,10)||0; }
+  });
+  fetch("/guardar", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(CFG)})
+    .then(r=>r.json()).then(j=>{ document.getElementById("aviso-cfg").textContent = j.ok ? "✓ guardado; se aplica en el próximo refresco" : ("Error: "+(j.error||"?")); })
+    .catch(e=>{ document.getElementById("aviso-cfg").textContent = "Error al guardar: "+e; });
+}
+pintaCfg();
+</script>
+"""
+
+
+def _con_cfg(cuerpo):
+    """Mete el configurador al final del panel."""
+    return cuerpo.replace("</body>", SECCION_CFG + "</body>")
+
+
 
 
 def datos():
@@ -273,7 +325,7 @@ pintar();
 
 def main():
     d = datos()
-    open(SALIDA, "w", encoding="utf-8").write(PLANTILLA.replace("__DATOS__", json.dumps(d, ensure_ascii=False)))
+    open(SALIDA, "w", encoding="utf-8").write(_con_cfg(PLANTILLA.replace("__DATOS__", json.dumps(d, ensure_ascii=False))))
     return SALIDA, d["hoy"]["tok"], d["ritmo"]
 
 

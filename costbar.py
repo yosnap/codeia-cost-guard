@@ -52,7 +52,7 @@ PROVEEDORES_DEFECTO = [
 
 ALIAS_DEFECTO = {
     "zai-coding-plan": "z.ai (coding plan)", "zai": "z.ai (coding plan)", "z-ai": "z.ai (coding plan)",
-    "opencode-go": "OpenCode Go", "opencode": "OpenCode (free)",
+    "opencode-go": "OpenCode Go", "opencode": "OpenCode Go",
     "nan.builders": "NaN", "nan": "NaN", "openrouter": "OpenRouter",
     "anthropic": "Claude (Max)", "openai": "OpenAI (Codex)",
     "codex": "OpenAI (Codex)", "google": "Google", "gemini": "Google",
@@ -473,6 +473,7 @@ def agregar(vistos, nuevos=0):
     cruce = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))
     proy_prov = collections.defaultdict(lambda: collections.defaultdict(int))
     modelo_prov = {}
+    origenes = collections.defaultdict(int)
     ahora = time.time()
     ignora = [str(x).lower() for x in (cfg().get("ignorar") or ["synthetic", "<synthetic>", "sin-modelo"])]
     for f, r in vistos.items():
@@ -508,6 +509,7 @@ def agregar(vistos, nuevos=0):
                 modelo_prov[corto(m)] = pn
                 tokv = v[0] + v[1] + v[2] + v[3]
                 cruce[pn][corto(m)][d] += tokv
+                origenes[str(r.get("plan") or "(sin origen)")] += tokv
                 proy_prov[pn][r.get("proyecto", "otros")] += tokv
                 if d >= hace7:
                     pp["semana"] += tokv
@@ -583,6 +585,8 @@ def agregar(vistos, nuevos=0):
             "cruce": {n: {m: dict(v) for m, v in d2.items()} for n, d2 in cruce.items()},
             "proy_prov": {n: dict(v) for n, v in proy_prov.items()},
         "modelo_prov": modelo_prov,
+        "origenes": dict(origenes),
+        "config": cfg(),
             "cache_pct_hoy": pct(dias.get(hoy, vacio())), "nuevos": nuevos,
             "limites": c, "fuentes": len(vistos)}
 
@@ -604,7 +608,84 @@ def informa(r):
     return "\n".join(L)
 
 
+def servir():
+    """Sirve el panel en http://127.0.0.1:8765 y guarda la configuracion que envies desde el.
+
+    Asi no hay que editar ficheros a mano: el propio panel tiene el configurador.
+    """
+    import http.server, socketserver, threading
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    cfg_ini = json.dumps(cfg(), indent=2, ensure_ascii=False)
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _manda(self, codigo, cuerpo, tipo):
+            self.send_response(codigo)
+            self.send_header("Content-Type", tipo)
+            self.send_header("Content-Length", str(len(cuerpo)))
+            self.end_headers()
+            self.wfile.write(cuerpo)
+
+        def do_GET(self):
+            ruta = self.path.split("?")[0]
+            if ruta in ("/", "/panel.html"):
+                try:
+                    self._manda(200, open(f"{base}/panel.html", "rb").read(), "text/html; charset=utf-8")
+                except Exception as e:
+                    self._manda(500, str(e).encode(), "text/plain")
+            elif ruta == "/origenes":
+                try:
+                    r = escanear()
+                    self._manda(200, json.dumps({"origenes": r.get("origenes", {}),
+                                                 "planes": [p["nombre"] for p in (cfg().get("proveedores") or [])],
+                                                 "config": cfg()}, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                except Exception as e:
+                    self._manda(500, json.dumps({"error": str(e)}).encode(), "application/json")
+            elif ruta == "/config.json":
+                self._manda(200, open(f"{base}/config.json", "rb").read(), "application/json; charset=utf-8")
+            else:
+                self._manda(404, b"no", "text/plain")
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                nuevo = json.loads(self.rfile.read(n).decode("utf-8"))
+                if not isinstance(nuevo, dict):
+                    raise ValueError("no es un objeto")
+                if "proveedores" not in nuevo or "aliases" not in nuevo:
+                    raise ValueError("faltan campos (proveedores / aliases)")
+                if os.path.exists(f"{base}/config.json"):
+                    import shutil as _sh
+                    _sh.copy(f"{base}/config.json", f"{base}/config.json.bak")
+                json.dump(nuevo, open(f"{base}/config.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+                try:
+                    est = leer_estado()
+                    est["version"] = 0                 # fuerza reescaneo con la config nueva
+                    escribir_estado(est)
+                except Exception:
+                    pass
+                log("configuracion guardada desde el panel")
+                self._manda(200, b'{"ok":true}', "application/json")
+            except Exception as e:
+                self._manda(400, json.dumps({"ok": False, "error": str(e)}).encode(), "application/json")
+
+    class S(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    try:
+        srv = S(("127.0.0.1", 8765), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        log(f"configurador listo en http://127.0.0.1:8765")
+    except OSError as e:
+        log(f"configurador no disponible: {e}")
+
+
 def main():
+    servir()
     if "--proveedores" in sys.argv:
         r = escanear()
         print("Modelos usados en los ultimos 7 dias, agrupados por proveedor:")
