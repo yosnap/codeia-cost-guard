@@ -73,6 +73,72 @@ def alias_de(fuente):
     return None
 
 
+NOMBRE_URL = (("cheaperinference", "CheaperInference"), ("nan.builders", "NaN"), ("openrouter", "OpenRouter"),
+              ("z.ai", "z.ai"), ("zhipu", "z.ai"), ("bigmodel", "z.ai"), ("nodeclub", "nodeclub.ai"),
+              ("opencode", "OpenCode Go"), ("openai", "OpenAI (Codex)"), ("anthropic", "Claude (Max)"),
+              ("deepseek", "DeepSeek"), ("chutes", "Chutes"), ("together", "Together"), ("groq", "Groq"))
+
+
+def nombre_de_url(url, perfil=""):
+    u = (url or "").lower()
+    for trozo, nombre in NOMBRE_URL:
+        if trozo in u:
+            return nombre
+    return alias_de(perfil) or perfil or "sin identificar"
+
+
+def linea_ccs():
+    """Linea de tiempo de CCS (Claude Code Switch): que proveedor tenia activo y cuando.
+
+    CCS deja un settings.json por cada cambio en ~/.ccs/backups/<perfil>.<fecha>.settings.json,
+    y ahi dentro va ANTHROPIC_BASE_URL. Con eso cada sesion de Claude se atribuye a su proveedor real.
+    """
+    traza = []
+    for b in glob.glob(f"{HOME}/.ccs/backups/*.settings.json"):
+        m = re.match(r"^([^.]+)\.(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})", os.path.basename(b))
+        if not m:
+            continue
+        perfil = m.group(1)
+        try:
+            cuando = time.mktime(time.strptime(f"{m.group(2)} {m.group(3)}:{m.group(4)}:{m.group(5)}", "%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            continue
+        url = ""
+        try:
+            d = json.load(open(b, encoding="utf-8"))
+            url = ((d.get("env") or {}).get("ANTHROPIC_BASE_URL") or "")
+        except Exception:
+            pass
+        traza.append((cuando, nombre_de_url(url, perfil), perfil, url))
+    # el perfil activo ahora mismo
+    ahora = f"{HOME}/.claude/settings.json"
+    if os.path.exists(ahora):
+        try:
+            d = json.load(open(ahora, encoding="utf-8"))
+            url = ((d.get("env") or {}).get("ANTHROPIC_BASE_URL") or "")
+            traza.append((os.path.getmtime(ahora), nombre_de_url(url, "ahora"), "ahora", url))
+        except Exception:
+            pass
+    return sorted(traza)
+
+
+_TRAZA_CCS = None
+
+
+def plan_ccs(ts):
+    """Proveedor activo en CCS en ese momento (epoch)."""
+    global _TRAZA_CCS
+    if _TRAZA_CCS is None:
+        _TRAZA_CCS = linea_ccs()
+    anterior = None
+    for cuando, nombre, perfil, url in _TRAZA_CCS:
+        if cuando <= (ts or 0):
+            anterior = (cuando, nombre, perfil, url)
+        else:
+            break
+    return anterior[1] if anterior else None
+
+
 def familia_de(m):
     """glm5.3-flash -> glm · qwen3.8-27b -> qwen · <synthetic> -> synthetic · sin-modelo -> otros"""
     m = re.sub(r"[^a-z0-9_.-]", "", corto(m or "").lower())
@@ -247,6 +313,8 @@ def parsear(ruta):
       · Claude Code: una linea por respuesta con message.usage (el input ya excluye la cache).
     """
     dia = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))
+    fecha_ini = None
+    fecha_ini = None
     turnos = collections.defaultdict(int)
     horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)})
     vistos = set()
@@ -312,8 +380,9 @@ def parsear(ruta):
         plan = "Claude (Max)"
     elif "/.codex/" in ruta:
         plan = "OpenAI (Codex)"
+    ccs = plan_ccs(fecha_ini) if "/.claude/" in ruta else None
     return {"dia": {k: {m: v for m, v in d.items()} for k, d in dia.items()},
-            "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy, "plan": plan}
+            "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy, "plan": ccs or plan}
 
 
 def leer_bases():
