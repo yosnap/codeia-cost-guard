@@ -7,7 +7,7 @@ color reservado a codificar la magnitud (k / m / b).
 import json, os, re, subprocess, sys
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-PY = f"{AQUI}/venv/bin/python"
+PY = sys.executable   # el mismo intérprete que corre esto
 SALIDA = f"{AQUI}/popover.html"
 
 
