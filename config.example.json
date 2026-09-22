@@ -57,12 +57,6 @@
       "limite_semana_tokens": 0
     },
     {
-      "nombre": "OpenCode (free)",
-      "modelos": [],
-      "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0
-    },
-    {
       "nombre": "OpenRouter",
       "modelos": [],
       "limite_5h_tokens": 0,
@@ -70,6 +64,18 @@
     },
     {
       "nombre": "z.ai (coding plan)",
+      "modelos": [],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "nodeclub.ai",
+      "modelos": [],
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0
+    },
+    {
+      "nombre": "CheaperInference",
       "modelos": [],
       "limite_5h_tokens": 0,
       "limite_semana_tokens": 0
