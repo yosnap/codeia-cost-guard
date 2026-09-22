@@ -189,6 +189,14 @@ def modelo_nativo(plan, modelo):
     return any(p in m for p in patrones)
 
 
+def plan_final(nombre, declarados):
+    """Evita duplicados tontos: 'Openrouter' y 'OpenRouter' son el mismo plan."""
+    for d in (declarados or ()):
+        if (d or "").strip().lower() == (nombre or "").strip().lower():
+            return d
+    return nombre
+
+
 def proveedor_de(modelo, provs, plan=None, fiable=True):
     """plan = proveedor real segun el log (providerID de OpenCode, URL base de Hermes...).
 
@@ -572,7 +580,7 @@ def agregar(vistos, nuevos=0):
                 suma(proys[r.get("proyecto", "otros")], v)
                 plan_f = r.get("plan")
                 fiable = bool(plan_f) and modelo_nativo(plan_f, m)
-                pn = proveedor_de(m, provs, plan_f, fiable)
+                pn = plan_final(proveedor_de(m, provs, plan_f, fiable), [x["nombre"] for x in provs])
                 pp = por_prov[pn]
                 pp["modelos"].add(corto(m))
                 modelo_prov[corto(m)] = pn

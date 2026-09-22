@@ -1,6 +1,8 @@
 {
-  "_nota": "Los limites salen de la informacion publica de cada proveedor (campo fuente). tipo: suscripcion = cuota que se agota; pago_por_uso = se paga lo que se gasta (ahi no hay cuota, cuenta el dinero).",
   "limite_hora_tokens": 8000000,
+  "limite_5h_tokens": 0,
+  "limite_semana_tokens": 0,
+  "_nota": "Los limites salen de la informacion publica de cada proveedor (campo fuente). tipo: suscripcion = cuota que se agota; pago_por_uso = se paga lo que se gasta (ahi no hay cuota, cuenta el dinero).",
   "ignorar": [
     "synthetic",
     "<synthetic>",
@@ -13,13 +15,17 @@
     "nan.builders": "NaN",
     "openrouter": "OpenRouter",
     "openai": "OpenAI (Codex)",
-    "anthropic": "Claude (Max)",
+    "anthropic": "Claude (Max) x20",
     "glm": "NaN",
     "gemma": "NaN",
     "qwen": "nodeclub.ai",
     "nemotron": "OpenRouter",
     "deepseek": "NaN",
-    "mimo": "OpenCode Go"
+    "mimo": "OpenCode Go",
+    "Claude (Max)": "Claude (Max) x20",
+    "https://api.nan.builders/v1": "NaN",
+    "https://openrouter.ai/api/v1": "OpenRouter",
+    "(sin origen)": "Sin origen"
   },
   "proveedores": [
     {
@@ -108,6 +114,14 @@
       "tipo": "pago_por_uso",
       "fuente": "https://www.cheaperinference.com/",
       "nota": "Pago por uso desde 5 $, sin compromiso mensual. Descuentos del 40-60 % sobre lista (glm-5.3-flash 55 %, gpt-5.6-luna 60 %, deepseek-v4-flash 41 %). Nunca por encima del precio de lista."
+    },
+    {
+      "nombre": "Claude (Max) x20",
+      "modelos": [],
+      "tipo": "suscripcion",
+      "limite_5h_tokens": 0,
+      "limite_semana_tokens": 0,
+      "nota": "Anthropic no publica cifras (ventana 5 h + semanal); el dato real en Settings > Usage."
     }
   ]
 }
