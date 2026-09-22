@@ -1,48 +1,60 @@
 #!/usr/bin/env bash
-# Instala codeia-cost-guard. macOS: app de barra de menus + panel. Linux/Windows: panel y medidor.
+# Instala codeia-cost-guard.
+#   macOS  -> barra de menus con estilo propio (icono + desplegable) y panel
+#   Otros  -> medidor y panel (solo necesita Python 3.9+)
 set -euo pipefail
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DESTINO="$HOME/.cost-guard"
+DESTINO="${COSTGUARD_HOME:-$HOME/.cost-guard}"
 REGLAS=0; [ "${1:-}" = "--reglas" ] && REGLAS=1
 
-echo "→ Copiando a $DESTINO"
+echo "-> Copiando a $DESTINO"
 mkdir -p "$DESTINO/logs"
-for f in costbar.py panel.py analizar_gasto.py precio_astra.py instalar_reglas_globales.py config.json GUIA.md AGENTS-snippet.md; do
+for f in costbar.py barra.py popover.py panel.py costbar.css analizar_gasto.py \
+         precio_astra.py instalar_reglas_globales.py config.json GUIA.md AGENTS-snippet.md; do
   [ -f "$AQUI/$f" ] && cp "$AQUI/$f" "$DESTINO/$f"
 done
+[ -f "$DESTINO/state.json" ] || echo "{}" > "$DESTINO/state.json"
 
 if [ "$(uname -s)" = "Darwin" ]; then
-  echo "→ Entorno de Python + rumps"
+  echo "-> Python + pillow + pyobjc"
   python3 -m venv "$DESTINO/venv" 2>/dev/null || true
   "$DESTINO/venv/bin/pip" install --quiet --upgrade pip
-  "$DESTINO/venv/bin/pip" install --quiet rumps pyobjc-framework-Cocoa
+  "$DESTINO/venv/bin/pip" install --quiet pillow pyobjc-framework-Cocoa
 
-  echo "→ Arranque automático al iniciar sesión"
+  if [ ! -e "/Applications/Google Chrome.app" ] && ! command -v chromium >/dev/null 2>&1; then
+    echo "  aviso: sin Chrome/Chromium el desplegable no se pinta (el icono si funciona)."
+  fi
+
+  echo "-> Arranque automatico al iniciar sesion"
   PLIST="$HOME/Library/LaunchAgents/dev.codeia.costguard.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
   cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>dev.codeia.costguard</string>
   <key>ProgramArguments</key><array>
-    <string>$DESTINO/venv/bin/python</string><string>$DESTINO/costbar.py</string>
+    <string>$DESTINO/venv/bin/python</string><string>$DESTINO/barra.py</string>
   </array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$DESTINO/logs/costbar.log</string>
-  <key>StandardErrorPath</key><string>$DESTINO/logs/costbar.err</string>
+  <key>StandardOutPath</key><string>$DESTINO/logs/barra.log</string>
+  <key>StandardErrorPath</key><string>$DESTINO/logs/barra.err</string>
 </dict></plist>
 PLIST
-  launchctl unload "$PLIST" 2>/dev/null || true
-  launchctl load "$PLIST"
-  echo "→ Listo: mira la barra de menús (icono con el gasto de hoy)."
+  launchctl bootout "gui/$(id -u)/dev.codeia.costguard" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null || true
+  echo ""
+  echo "Listo: mira la barra de menus (icono con la cifra de las ultimas 5 h)."
+  echo "  Log:     $DESTINO/logs/barra.log"
+  echo "  Parar:   launchctl bootout gui/$(id -u)/dev.codeia.costguard"
+  echo "  Arrancar launchctl bootstrap gui/$(id -u) $PLIST"
+  echo "  Prueba:  $DESTINO/venv/bin/python $DESTINO/barra.py --abre"
 else
-  echo "→ Linux/Windows: usa el medidor y el panel"
-  echo "   python3 $DESTINO/analizar_gasto.py"
-  echo "   python3 $DESTINO/panel.py   # abre panel.html"
+  echo "Listo (sin barra de menus en este sistema)."
 fi
 
-if [ "$REGLAS" = "1" ]; then
-  echo "→ Reglas de ahorro en los ficheros de instrucciones globales"
-  python3 "$DESTINO/instalar_reglas_globales.py"
+if [ "$REGLAS" = 1 ] && [ -f "$DESTINO/instalar_reglas_globales.py" ]; then
+  python3 "$DESTINO/instalar_reglas_globales.py" || true
 fi
-echo "Hecho. Guia: $DESTINO/GUIA.md"
+echo ""
+echo "Panel: python3 \"$DESTINO/panel.py\"  (genera panel.html)"

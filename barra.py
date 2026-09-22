@@ -34,6 +34,17 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
+
+
+def navegador():
+    """El motor que convierte el HTML en imagen. Chrome headless, o Chromium/Brave."""
+    for ruta in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                 "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                 "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                 "/usr/bin/chromium", "/usr/bin/google-chrome"):
+        if os.path.exists(ruta):
+            return ruta
+    return None
 PY = f"{AQUI}/venv/bin/python"
 LOG = f"{AQUI}/logs/barra.log"
 
@@ -184,7 +195,7 @@ class Barra(NSObject):
         subprocess.run([PY, f"{AQUI}/popover.py"] + (["--tema", "oscuro"] if tema == "oscuro" else []),
                        capture_output=True, timeout=120)
         bruto = f"{AQUI}/logs/_bruto_{tema}.png"
-        subprocess.run(["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "--headless=new",
+        subprocess.run([navegador(), "--headless=new",
                         "--hide-scrollbars", "--default-background-color=00000000",
                         "--force-device-scale-factor=2", f"--screenshot={bruto}",
                         "--window-size=404,1300", f"file://{html}"], capture_output=True, timeout=180)

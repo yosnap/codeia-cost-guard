@@ -1,3 +1,5 @@
-# El medidor y el panel no necesitan nada (solo Python 3.9+).
-# La app de la barra de menus es macOS:
-rumps>=0.4.0
+# Solo para la barra de menús en macOS. El medidor y el panel funcionan sin nada de esto.
+pillow>=10.0
+pyobjc-framework-Cocoa>=9.2
+# opcionales: la barra antigua basada en el menú nativo
+# rumps>=0.4
