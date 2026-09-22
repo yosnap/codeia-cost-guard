@@ -1,4 +1,4 @@
-# En el repo publico este fichero se llama analizar_gasto.py (antes medir_consumo_orca.py).
+# En el repo publico este fichero se llama analizar_gasto.py.
 #!/usr/bin/env python3
 """Informe de gasto de los agentes. Envoltorio del escaner de CostBar: mismos numeros que el
 icono de la barra de menus y que el aviso de los lunes. Acotado por fecha de turno (no por mtime).

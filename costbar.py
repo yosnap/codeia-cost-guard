@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""CostBar - gasto de tokens de la flota de agentes, en la barra de menus del Mac.
+"""CostBar - consumo de tokens de la flota de agentes, en la barra de menus del Mac.
 
-Lee los logs de Claude Code / Codex / OpenCode, desduplica los turnos copiados por los forks
-(el mismo sesgo que inflaba ~15x el panel de Orca) y muestra el gasto de hoy y el ritmo por hora.
+Lee los logs de Claude Code / Codex / OpenCode y muestra, en primer plano, **tokens**: entrada,
+salida, cache leida y cache escrita, mas los turnos, la **ventana de 5 horas** (la que se agota en
+las suscripciones) y la **semana**. Los dolares quedan solo como referencia (equivalente API),
+porque con suscripcion no se paga por token.
+
+Desduplica los turnos copiados por los forks de Claude Code (el sesgo que inflaba ~15x el panel de
+Orca). Cuenta los tokens de TODOS los modelos, tengan tarifa conocida o no.
 
 Uso:
     ./venv/bin/python costbar.py --print      # imprime el informe y sale (sin GUI)
@@ -17,8 +22,10 @@ CONFIG = f"{AQUI}/config.json"
 LOG = f"{AQUI}/logs/costbar.log"
 FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions", f"{HOME}/.local/share/opencode"]
 DIAS = 7
+VENTANA_H = 5               # ventana de 5 horas de las suscripciones
+VERSION_ESTADO = 4          # subir cuando cambie el formato del cache: obliga a reescanear
 
-# tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache)
+# tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache) — solo para el equivalente API
 TARIFAS = {
     "claude-opus-5": (5, 25, .50, 6.25), "claude-sonnet-5": (3, 15, .30, 3.75),
     "claude-fable-5": (10, 50, 1, 12.50), "claude-haiku": (1, 5, .10, 1.25),
@@ -28,156 +35,304 @@ TARIFAS = {
     "gpt-5.6": (5, 30, .50, 6.25),
 }
 CLIFF = 272_000
+
+
 def corto(m):
     """claude-sonnet-5 -> sonnet-5 · gpt-5.6-terra -> terra · claude-haiku-4-5-20251001 -> haiku-4-5"""
-    m = re.sub(r"-\d{8}$", "", (m or "?")).replace("claude-", "").replace("gpt-5.6-", "")
+    m = re.sub(r"-\d{8}$", "", (m or "?").replace("claude-", "").replace("gpt-5.6-", ""))
     return m.split("/")[0]
+
+
+def familia(m):
+    """Claude y OpenAI son suscripciones distintas: interesa verlas por separado."""
+    m = (m or "").lower()
+    if "claude" in m:
+        return "claude"
+    if "gpt" in m or m.startswith(("o3", "o4", "codex")):
+        return "openai"
+    return "otros"
+
+
 def tarifa(m):
     m = (m or "").lower()
     for k, v in TARIFAS.items():
-        if k in m: return v
+        if k in m:
+            return v
     return None
 
+
+def fmt_tok(n):
+    """18300000 -> 18,3 M · 820000 -> 820 K"""
+    n = float(n or 0)
+    for corte, sufijo in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if n >= corte:
+            return f"{n / corte:.1f} {sufijo}".replace(".", ",")
+    return str(int(n))
+
+
 def log(msg):
+    os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a") as f:
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
 
+
 def cfg():
-    d = {"limite_hora_usd": 25.0, "limite_dia_usd": 150.0}
+    d = {"limite_hora_tokens": 8_000_000, "limite_5h_tokens": 0, "limite_semana_tokens": 0}
     if os.path.exists(CONFIG):
-        try: d.update(json.load(open(CONFIG)))
-        except Exception: pass
+        try:
+            d.update(json.load(open(CONFIG)))
+        except Exception:
+            pass
     return d
+
 
 def leer_estado():
     if os.path.exists(STATE):
-        try: return json.load(open(STATE))
-        except Exception: pass
-    return {"ficheros": {}}
+        try:
+            s = json.load(open(STATE))
+            if s.get("version") == VERSION_ESTADO:
+                return s
+        except Exception:
+            pass
+    return {"version": VERSION_ESTADO, "ficheros": {}}
+
 
 def guardar_estado(s):
+    s["version"] = VERSION_ESTADO
     tmp = STATE + ".tmp"
     json.dump(s, open(tmp, "w"))
     os.replace(tmp, STATE)
 
+
+def _hallar_uso(o, p=0):
+    """Busca el bloque de uso de un turno. Descarta los acumulados de Codex (llevan total_tokens)."""
+    if p > 6 or not isinstance(o, (dict, list)):
+        return None
+    if isinstance(o, dict):
+        if "input_tokens" in o and "total_tokens" not in o:
+            return o
+        if isinstance(o.get("last_token_usage"), dict):
+            return o["last_token_usage"]
+        for v in o.values():
+            r = _hallar_uso(v, p + 1)
+            if r:
+                return r
+    elif o:
+        return _hallar_uso(o[0], p + 1)
+    return None
+
+
 def parsear(ruta):
-    """Devuelve {dia: {modelo: [gi,go,cr,cw]}, horas: {'YYYY-MM-DDTHH': usd}, proyecto: slug}"""
+    """Devuelve {dia: {modelo: [gi,go,cr,cw]}, turnos: {dia: n}, horas: {'YYYY-MM-DDTHH': {'tok','usd','fam'}}, proyecto: slug}
+
+    Dos formatos, y confundirlos infla los totales:
+      · Codex (rollouts): cada turno se escribe DOS veces (token_usage_record y event_msg/token_count,
+        con el mismo segundo) y el fichero lleva ademas total_token_usage, que es ACUMULADO. Se usa el
+        uso del turno (last_token_usage) y se descarta el acumulado. En Codex cached_input_tokens esta
+        DENTRO de input_tokens, asi que la entrada fresca es input - cached.
+      · Claude Code: una linea por respuesta con message.usage (el input ya excluye la cache).
+    """
     dia = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))
-    horas = collections.defaultdict(float)
+    turnos = collections.defaultdict(int)
+    horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "fam": collections.defaultdict(int)})
     vistos = set()
     proy = "codex/otros"
     if "/projects/" in ruta:
         trozos = [x for x in urllib.parse.unquote(ruta.split("/projects/")[-1].split("/")[0]).split("-") if x]
         proy = "/".join(trozos[-3:]) if trozos else "otros"
-    ult = None
-    try: fh = open(ruta, encoding="utf-8", errors="ignore")
-    except Exception: return None
+    modelo = None
+    try:
+        fh = open(ruta, encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
     for linea in fh:
-        if "input_tokens" not in linea and "inputTokens" not in linea: continue
-        try: d = json.loads(linea)
-        except Exception: continue
+        if "input_tokens" not in linea and "inputTokens" not in linea:
+            continue
+        try:
+            d = json.loads(linea)
+        except Exception:
+            continue
         ts = str(d.get("timestamp") or d.get("ts") or "")
-        def walk(o, p=0):
-            nonlocal ult
-            if p > 6: return None
-            if isinstance(o, dict):
-                if isinstance(o.get("model"), str): ult = o["model"]
-                if "input_tokens" in o or "inputTokens" in o: return o
-                for v in o.values():
-                    r = walk(v, p + 1)
-                    if r: return r
-            elif isinstance(o, list) and o: return walk(o[0], p + 1)
-            return None
-        u = walk(d)
-        if not u: continue
-        gi = u.get("input_tokens", u.get("inputTokens", 0)) or 0
-        go = u.get("output_tokens", u.get("outputTokens", 0)) or 0
-        cr = u.get("cache_read_input_tokens", u.get("cachedInputTokens", 0)) or 0
-        cw = u.get("cache_creation_input_tokens", u.get("cacheWriteInputTokens", 0)) or 0
-        h = hashlib.md5(f"{ult}|{ts}|{gi}|{go}|{cr}|{cw}".encode()).hexdigest()
-        if h in vistos: continue          # fork duplicado
-        vistos.add(h)
-        k = ult or "sin-modelo"
+        m = re.search(r'"model"\s*:\s*"([^"]+)"', linea)
+        if m:
+            modelo = m.group(1)
+        uso = _hallar_uso(d)
+        if not uso:
+            continue
+        if "cached_input_tokens" in uso or "total_tokens" in uso:      # Codex: la cache va dentro de la entrada
+            cr = uso.get("cached_input_tokens", 0) or 0
+            gi = max((uso.get("input_tokens", 0) or 0) - cr, 0)
+            cw = uso.get("cache_write_input_tokens", 0) or 0
+        else:                                                          # Claude: entrada y cache separadas
+            gi = uso.get("input_tokens", uso.get("inputTokens", 0)) or 0
+            cr = uso.get("cache_read_input_tokens", uso.get("cachedInputTokens", 0)) or 0
+            cw = uso.get("cache_creation_input_tokens", uso.get("cacheWriteInputTokens", 0)) or 0
+        go = uso.get("output_tokens", uso.get("outputTokens", 0)) or 0
+        # el doble registro de Codex comparte el segundo: incluir el segundo en la clave lo descarta
+        clave = f"{modelo}|{ts[:19]}|{gi}|{go}|{cr}|{cw}"
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        k = modelo or "sin-modelo"
+        tok = gi + go + cr + cw
         if len(ts) >= 10:
-            a = dia[ts[:10]][k]; a[0] += gi; a[1] += go; a[2] += cr; a[3] += cw
-        t = tarifa(k)
-        if t and len(ts) >= 13:
-            over = gi > CLIFF
-            horas[ts[:13]] += (max(gi - cr, 0) * t[0] * (2 if over else 1)
-                               + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
-                               + go * t[1] * (1.5 if over else 1)) / 1e6
+            a = dia[ts[:10]][k]
+            a[0] += gi
+            a[1] += go
+            a[2] += cr
+            a[3] += cw
+            turnos[ts[:10]] += 1
+        if len(ts) >= 13:
+            horas[ts[:13]]["tok"] += tok
+            horas[ts[:13]]["fam"][familia(k)] += tok
+            t = tarifa(k)
+            if t:
+                over = gi > CLIFF
+                horas[ts[:13]]["usd"] += (max(gi - cr, 0) * t[0] * (2 if over else 1)
+                                          + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
+                                          + go * t[1] * (1.5 if over else 1)) / 1e6
     fh.close()
     return {"dia": {k: {m: v for m, v in d.items()} for k, d in dia.items()},
-            "horas": dict(horas), "proyecto": proy}
+            "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy}
+
 
 def escanear():
     estado = leer_estado()
     vistos, nuevos = {}, 0
     for base in FUENTES:
-        for f in glob.glob(f"{base}/**/*.jsonl", recursive=True) + glob.glob(f"{base}/**/*.json", recursive=True):
-            try: st = os.stat(f)
-            except OSError: continue
+        ficheros = glob.glob(f"{base}/**/*.jsonl", recursive=True) + glob.glob(f"{base}/**/*.json", recursive=True)
+        for f in ficheros:
+            try:
+                st = os.stat(f)
+            except OSError:
+                continue
             clave = f"{int(st.st_mtime)}:{st.st_size}"
             prev = estado["ficheros"].get(f)
             if prev and prev.get("clave") == clave:
                 vistos[f] = prev
             else:
                 r = parsear(f)
-                if r is None: continue
+                if r is None:
+                    continue
                 r["clave"] = clave
-                vistos[f] = r; nuevos += 1
+                vistos[f] = r
+                nuevos += 1
     estado["ficheros"] = vistos
     guardar_estado(estado)
-    # agregar
-    por_dia, por_hora, por_proy, por_modelo = (collections.defaultdict(float) for _ in range(4))
+    return agregar(vistos, nuevos)
+
+
+def vacio():
+    return {"gi": 0, "go": 0, "cr": 0, "cw": 0, "tok": 0, "turnos": 0, "usd": 0.0}
+
+
+def suma(dest, v):
+    dest["gi"] += v[0]; dest["go"] += v[1]; dest["cr"] += v[2]; dest["cw"] += v[3]
+    dest["tok"] += v[0] + v[1] + v[2] + v[3]
+
+
+def agregar(vistos, nuevos=0):
     hoy = time.strftime("%Y-%m-%d")
+    ayer = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
     desde = time.strftime("%Y-%m-%d", time.localtime(time.time() - DIAS * 86400))
-    c = cfg()
+    dias = collections.defaultdict(vacio)
+    modelos_hoy = collections.defaultdict(vacio)
+    proys = collections.defaultdict(vacio)
+    ritmo = {"tok": 0, "usd": 0.0}
+    cinco = {"tok": 0, "usd": 0.0, "fam": collections.defaultdict(int)}
+    ahora = time.time()
     for f, r in vistos.items():
-        for d, mods in r["dia"].items():
-            if d and d < desde: continue
+        for d, mods in r.get("dia", {}).items():
+            if not d or d < desde:
+                continue
             for m, v in mods.items():
+                suma(dias[d], v)
                 t = tarifa(m)
-                if not t: continue
-                over = v[0] > CLIFF
-                usd = (max(v[0] - v[2], 0) * t[0] * (2 if over else 1) + v[2] * t[2] * (2 if over else 1)
-                       + v[3] * t[3] * (2 if over else 1) + v[1] * t[1] * (1.5 if over else 1)) / 1e6
-                por_dia[d] += usd
-                if d == hoy: por_modelo[m] += usd
-                if d >= desde:
-                    por_proy[r["proyecto"]] += usd
-        for h, v in r["horas"].items():
-            if len(h) < 13: continue
-            try: hm = time.mktime(time.strptime(h, "%Y-%m-%dT%H"))
-            except ValueError: continue
-            if time.time() - hm < 3600: por_hora[h] = por_hora.get(h, 0) + v
-    ritmo = sum(por_hora.values())
-    return {"hoy": por_dia.get(hoy, 0.0), "ayer": por_dia.get(time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400)), 0.0),
-            "semana": sum(por_dia.values()), "ritmo": ritmo, "dias": dict(por_dia),
-            "modelos": dict(por_modelo), "proyectos": dict(por_proy), "nuevos": nuevos, "limites": c}
+                if t:
+                    over = v[0] > CLIFF
+                    dias[d]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
+                                       + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
+                                       + v[1] * t[1] * (1.5 if over else 1)) / 1e6
+                if d == hoy:
+                    suma(modelos_hoy[m], v)
+                    if t:
+                        over = v[0] > CLIFF
+                        modelos_hoy[m]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
+                                                  + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
+                                                  + v[1] * t[1] * (1.5 if over else 1)) / 1e6
+                suma(proys[r.get("proyecto", "otros")], v)
+        for d, n in r.get("turnos", {}).items():
+            if d and d >= desde:
+                dias[d]["turnos"] += n
+        for h, v in r.get("horas", {}).items():
+            if len(h) < 13:
+                continue
+            try:
+                hm = time.mktime(time.strptime(h, "%Y-%m-%dT%H"))
+            except ValueError:
+                continue
+            edad = ahora - hm
+            if edad < 3600:
+                ritmo["tok"] += v.get("tok", 0)
+                ritmo["usd"] += v.get("usd", 0.0)
+            if edad < VENTANA_H * 3600:            # ventana de 5 horas de la suscripcion
+                cinco["tok"] += v.get("tok", 0)
+                cinco["usd"] += v.get("usd", 0.0)
+                for k2, t2 in (v.get("fam") or {}).items():
+                    cinco["fam"][k2] += t2
+
+    def pct(bloque):
+        entrada_total = bloque["gi"] + bloque["cr"] + bloque["cw"]
+        return (bloque["cr"] / entrada_total * 100) if entrada_total else 0.0
+
+    for d in dias:
+        dias[d]["cache_pct"] = pct(dias[d])
+    c = cfg()
+    lim5, limsem = c.get("limite_5h_tokens") or 0, c.get("limite_semana_tokens") or 0
+    semana = {k: sum(dias[d][k] for d in dias if d) for k in ("gi", "go", "cr", "cw", "tok", "turnos")}
+    semana["usd"] = sum(dias[d]["usd"] for d in dias if d)
+    return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana,
+            "ritmo": ritmo, "cinco_h": {"tok": cinco["tok"], "usd": cinco["usd"], "fam": dict(cinco["fam"])},
+            "pct_5h": (cinco["tok"] / lim5 * 100) if lim5 else 0.0,
+            "pct_semana": (semana["tok"] / limsem * 100) if limsem else 0.0,
+            "dias": {d: dias[d] for d in dias if d},
+            "modelos_hoy": dict(modelos_hoy), "proyectos": dict(proys),
+            "cache_pct_hoy": pct(dias.get(hoy, vacio())), "nuevos": nuevos,
+            "limites": c, "fuentes": len(vistos)}
+
 
 def informa(r):
-    L = [f"HOY {r['hoy']:.2f} USD   ritmo ultima hora {r['ritmo']:.2f} USD/h   (limite {r['limites']['limite_hora_usd']:.0f}/h)",
-         f"AYER {r['ayer']:.2f} USD   ULTIMOS 7 DIAS {r['semana']:.2f} USD",
-         "por dia: " + " · ".join(f"{d[5:]}: {v:.0f}" for d, v in sorted(r["dias"].items()) if d),
-         "modelos hoy: " + " · ".join(f"{corto(k)}: {v:.0f}" for k, v in sorted(r["modelos"].items(), key=lambda x: -x[1])[:5]),
-         "proyectos 7d: " + " · ".join(f"{k[-34:]:<34}: {v:>6.0f}" for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1])[:5])]
+    h, c5 = r["hoy"], r["cinco_h"]
+    fam = " · ".join(f"{k}: {fmt_tok(v)}" for k, v in sorted(c5["fam"].items(), key=lambda x: -x[1]) if v)
+    L = [f"VENTANA 5 H  {fmt_tok(c5['tok'])} tokens" + (f"   {fam}" if fam else ""),
+         f"SEMANA       {fmt_tok(r['semana']['tok'])} tokens ({r['semana']['turnos']} turnos)",
+         f"HOY          {fmt_tok(h['tok'])} tokens ({h['turnos']} turnos)   ritmo ultima hora {fmt_tok(r['ritmo']['tok'])} tokens",
+         f"             entrada {fmt_tok(h['gi'])} · salida {fmt_tok(h['go'])} · cache leida {fmt_tok(h['cr'])} ({r['cache_pct_hoy']:.0f} %) · cache escrita {fmt_tok(h['cw'])}",
+         "por dia: " + " · ".join(f"{d[5:]}: {fmt_tok(v['tok'])}" for d, v in sorted(r["dias"].items())),
+         "modelos hoy: " + " · ".join(f"{corto(k)}: {fmt_tok(v['tok'])}" for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1]["tok"])[:6]),
+         "proyectos 7d: " + " · ".join(f"{k}: {fmt_tok(v['tok'])}" for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1]["tok"])[:5]),
+         f"equivalente API (informativo): {h['usd']:.2f} USD hoy · {r['semana']['usd']:.0f} USD en 7 dias"]
     return "\n".join(L)
+
 
 def main():
     if "--print" in sys.argv:
-        r = escanear(); print(informa(r)); return
+        print(informa(escanear()))
+        return
     try:
         import rumps
     except ImportError:
         print("rumps no está instalado (solo hace falta para el icono de la barra en macOS).")
         print("Sin él sí funcionan:  python3 analizar_gasto.py   y   python3 panel.py")
         return
+
     class CostBar(rumps.App):
         def __init__(self):
-            super().__init__("CostBar", title="$…", quit_button=None)
-            self.r = None; self.refrescar(None)
+            super().__init__("CostBar", title="…", quit_button=None)
+            self.r = None
+            self.refrescar(None)
             rumps.Timer(self.refrescar, 60).start()
+
         def abrir_panel(self, _):
             try:
                 sys.path.insert(0, AQUI)
@@ -186,43 +341,68 @@ def main():
                 subprocess.Popen(["open", ruta])
             except Exception as e:
                 log(f"ERROR panel: {type(e).__name__}: {e}")
+
         def _item(self, titulo):
-            it = rumps.MenuItem(titulo); self.menu.add(it); return it
+            it = rumps.MenuItem(titulo)
+            self.menu.add(it)
+            return it
+
         def refrescar(self, _):
             try:
-                r = escanear(); self.r = r
-                aviso = " · %.0f/h" % r["ritmo"] if r["ritmo"] >= r["limites"]["limite_hora_usd"] else ""
-                self.title = f"${r['hoy']:.1f}{aviso}"
+                r = escanear()
+                self.r = r
+                h, c5 = r["hoy"], r["cinco_h"]
+                lim5 = r["limites"].get("limite_5h_tokens") or 0
+                alto = r["ritmo"]["tok"] >= r["limites"]["limite_hora_tokens"]
+                self.title = fmt_tok(c5["tok"]) + (" !" if alto else "")
                 self.menu.clear()
-                self._item(f"Hoy: {r['hoy']:.2f} USD   (ritmo {r['ritmo']:.2f} USD/h)")
-                self._item(f"Ayer: {r['ayer']:.2f} USD   ·   7 dias: {r['semana']:.2f} USD")
+                m = self._item
+                # la ventana de 5 horas es el dato que se agota en las suscripciones
+                m(f"Ultimas 5 h: {fmt_tok(c5['tok'])} tokens" + (f"  ({r['pct_5h']:.0f} % del limite)" if lim5 else ""))
+                for k, v in sorted(c5["fam"].items(), key=lambda x: -x[1]):
+                    if v:
+                        m(f"   {k}: {fmt_tok(v)}")
+                m(f"Semana: {fmt_tok(r['semana']['tok'])} tokens · {r['semana']['turnos']} turnos")
+                self.menu.add(rumps.separator)
+                m(f"Hoy: {fmt_tok(h['tok'])} tokens · {h['turnos']} turnos")
+                m(f"   entrada {fmt_tok(h['gi'])} · salida {fmt_tok(h['go'])}")
+                m(f"   cache leida {fmt_tok(h['cr'])} ({r['cache_pct_hoy']:.0f} % de la entrada) · escrita {fmt_tok(h['cw'])}")
+                m(f"Ritmo ultima hora: {fmt_tok(r['ritmo']['tok'])} tokens" + ("  ALTO" if alto else ""))
+                self.menu.add(rumps.separator)
+                m(f"Ayer: {fmt_tok(r['ayer']['tok'])} tokens · {r['ayer']['turnos']} turnos")
                 for d, v in sorted(r["dias"].items())[-5:]:
-                    self._item(f"   {d[5:]}: {v:.2f} USD")
-                mods = rumps.MenuItem("Por modelo (hoy)")
-                for k, v in sorted(r["modelos"].items(), key=lambda x: -x[1])[:6]:
-                    mods.add(rumps.MenuItem(f"{corto(k)}: {v:.2f} USD"))
-                self.menu.add(mods)
-                proy = rumps.MenuItem("Por proyecto (7 dias)")
-                for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1])[:8]:
-                    proy.add(rumps.MenuItem(f"{k}: {v:.0f} USD"))
-                self.menu.add(proy)
+                    m(f"   {d[5:]}: {fmt_tok(v['tok'])} ({v['turnos']} turnos)")
+                mm = rumps.MenuItem("Por modelo (hoy)")
+                for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1]["tok"])[:8]:
+                    mm.add(rumps.MenuItem(f"{corto(k)}: {fmt_tok(v['tok'])} · {v['turnos']} turnos"))
+                self.menu.add(mm)
+                pp = rumps.MenuItem("Por proyecto (7 dias)")
+                for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1]["tok"])[:8]:
+                    pp.add(rumps.MenuItem(f"{k}: {fmt_tok(v['tok'])}"))
+                self.menu.add(pp)
+                self.menu.add(rumps.separator)
+                m(f"Equivalente API: {h['usd']:.1f} USD hoy (informativo)")
+                m("Con suscripcion no se paga por token: mira tokens y turnos.")
                 self.menu.add(rumps.separator)
                 self.menu.add(rumps.MenuItem("Abrir panel", callback=self.abrir_panel))
                 self.menu.add(rumps.MenuItem("Abrir la guia", callback=lambda _: subprocess.Popen(["open", os.path.join(AQUI, "GUIA.md")])))
                 self.menu.add(rumps.MenuItem("Refrescar ahora", callback=self.refrescar))
                 self.menu.add(rumps.MenuItem("Salir", callback=rumps.quit_application))
-                if r["ritmo"] >= r["limites"]["limite_hora_usd"]:
-                    rumps.notification("CostBar", f"Ritmo alto: {r['ritmo']:.0f} USD/h", f"Hoy llevas {r['hoy']:.0f} USD. Revísalo antes de que se vaya el día.")
+                if alto:
+                    rumps.notification("CostBar", f"Ritmo alto: {fmt_tok(r['ritmo']['tok'])} tokens/h",
+                                       f"5 h: {fmt_tok(c5['tok'])} · hoy {fmt_tok(h['tok'])}. Baja turnos o contexto.")
                 try:
                     import panel
                     panel.main()
                 except Exception as e:
                     log(f"panel: {type(e).__name__}: {e}")
-                log(f"refresco ok: hoy {r['hoy']:.2f} ritmo {r['ritmo']:.2f} nuevos {r['nuevos']}")
+                log(f"refresco ok: 5h {fmt_tok(c5['tok'])} · hoy {fmt_tok(h['tok'])} tok · {h['turnos']} turnos · nuevos {r['nuevos']}")
             except Exception as e:
                 log(f"ERROR {type(e).__name__}: {e}")
-                self.title = "$!"
+                self.title = "!"
+
     CostBar().run()
+
 
 if __name__ == "__main__":
     main()

@@ -1,8 +1,9 @@
 # codeia-cost-guard
 
 Mide (y ayuda a frenar) el gasto de tokens de tu flota de agentes: **Claude Code, Codex, OpenCode**.
-Lee sus logs locales, descarta los turnos duplicados por los *forks*, y te lo enseña en un panel y en
-un icono de la barra de menús.
+Lee sus logs locales, descarta los turnos duplicados, y te lo enseña en un panel y en un icono de la
+barra de menús. Todo en **tokens**: la **ventana de 5 horas** (la que se agota en las suscripciones), la
+**semana**, el día, los turnos y la caché. Los dólares van solo como equivalente API informativo.
 
 Hecho por [Codeia](https://codeia.dev) — el sitio donde se aprenden estas tecnologías.
 
@@ -44,7 +45,24 @@ ahorro en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md`: `./install.sh --reglas`.
   globales de los agentes CLI. Idempotente y con copia de seguridad.
 - **`GUIA.md`** — la guía: las cinco palancas y por qué el contexto manda.
 
+## Qué te muestra
+
+- **Ventana de 5 horas** y **semana** en tokens, separando Claude de OpenAI (son suscripciones distintas).
+- **Hoy**: entrada, salida, caché leída (con su % sobre la entrada) y caché escrita.
+- **Turnos**: cada ida y vuelta con el modelo reenvía el contexto, y ahí está el gasto.
+- **Ritmo de la última hora**, con aviso si pasa del límite.
+- Por día, por modelo y por proyecto.
+
 ## Cómo cuenta
+
+Dos formatos distintos, y confundirlos infla los totales (lo aprendimos midiendo):
+
+- **Claude Code**: una línea por respuesta, con `message.usage`. Ahí la entrada y la caché ya vienen
+  separadas.
+- **Codex** (rollouts): cada turno se escribe **dos veces** (`token_usage_record` y
+  `event_msg/token_count`, en el mismo segundo) y el fichero lleva además `total_token_usage`, que es
+  **acumulado**. Hay que usar el uso del turno ignorando el acumulado, y tener en cuenta que
+  `cached_input_tokens` va **dentro** de `input_tokens`.
 
 Lee los logs de sesión de `~/.claude`, `~/.codex` y `~/.opencode`, se queda con los turnos **únicos**
 (los forks de Claude Code copian los turnos de sus padres y contarían doble) y aplica los precios de
