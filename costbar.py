@@ -23,7 +23,7 @@ LOG = f"{AQUI}/logs/costbar.log"
 FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions", f"{HOME}/.local/share/opencode"]
 DIAS = 31
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
-VERSION_ESTADO = 8          # subir cuando cambie el formato del cache: obliga a reescanear
+VERSION_ESTADO = 9          # subir cuando cambie el formato del cache: obliga a reescanear
 
 # tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache) — solo para el equivalente API
 TARIFAS = {
@@ -47,6 +47,29 @@ PROVEEDORES_DEFECTO = [
     {"nombre": "Claude", "modelos": ["claude"]},
     {"nombre": "OpenAI", "modelos": ["gpt", "o3", "o4", "codex"]},
 ]
+
+
+ALIAS_DEFECTO = {
+    "zai-coding-plan": "z.ai (coding plan)", "zai": "z.ai (coding plan)", "z-ai": "z.ai (coding plan)",
+    "opencode-go": "OpenCode Go", "opencode": "OpenCode (free)",
+    "nan.builders": "NaN", "nan": "NaN", "openrouter": "OpenRouter",
+    "anthropic": "Claude (Max)", "openai": "OpenAI (Codex)",
+    "codex": "OpenAI (Codex)", "google": "Google", "gemini": "Google",
+}
+
+
+def alias_de(fuente):
+    """zai-coding-plan -> z.ai (coding plan). Los nombres mas largos primero, para que
+    'opencode-go' no lo capture 'opencode'."""
+    if not fuente:
+        return None
+    al = dict(ALIAS_DEFECTO)
+    al.update(cfg().get("aliases") or {})
+    f = str(fuente).lower()
+    for k in sorted(al, key=len, reverse=True):
+        if k.lower() in f:
+            return al[k]
+    return None
 
 
 def familia_de(m):
@@ -86,7 +109,10 @@ def proveedores_de(c, modelos=()):
     return salida
 
 
-def proveedor_de(modelo, provs):
+def proveedor_de(modelo, provs, plan=None):
+    """plan = proveedor real segun el log (providerID de OpenCode, URL base de Hermes...)."""
+    if plan:
+        return alias_de(plan) or plan
     m = (modelo or "").lower()
     for p in provs:
         if any(pat and pat in m for pat in p["modelos"]):
@@ -254,8 +280,13 @@ def parsear(ruta):
                                           + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
                                           + go * t[1] * (1.5 if over else 1)) / 1e6
     fh.close()
+    plan = None
+    if "/.claude/" in ruta:
+        plan = "Claude (Max)"
+    elif "/.codex/" in ruta:
+        plan = "OpenAI (Codex)"
     return {"dia": {k: {m: v for m, v in d.items()} for k, d in dia.items()},
-            "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy}
+            "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy, "plan": plan}
 
 
 def leer_bases():
@@ -287,11 +318,11 @@ def leer_bases():
                 pass
         return m.strip()
 
-    def mete(proyecto, ts, modelo, gi, go, cr, cw):
+    def mete(proyecto, plan, ts, modelo, gi, go, cr, cw):
         if not ts or len(str(ts)) < 10:
             return
         ts = str(ts)
-        proy = saca(proyecto or "Hermes/OpenCode")
+        proy = saca((proyecto or "Hermes/OpenCode", plan or ""))
         k = limpia_modelo(modelo) or "sin-modelo"
         a = proy["dia"][ts[:10]][k]
         a[0] += gi; a[1] += go; a[2] += cr; a[3] += cw
@@ -326,7 +357,13 @@ def leer_bases():
             filas = list(con.execute("select model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, directory from session"))
             con.close()
             for m, ti, to, tcr, tcw, creado, direc in filas:
-                mete(f"OpenCode · {ultimos(direc) or 'sin proyecto'}", hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0)
+                prov = ""
+                if (m or "").strip().startswith("{"):
+                    try:
+                        prov = json.loads(m).get("providerID") or ""
+                    except Exception:
+                        prov = ""
+                mete(f"OpenCode · {ultimos(direc) or 'sin proyecto'}", prov, hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0)
             nombres.append(f"OpenCode ({len(filas)})")
             break
         except Exception as e:
@@ -336,10 +373,10 @@ def leer_bases():
         try:
             perfil = db.split("/profiles/")[-1].split("/")[0]
             con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-            filas = list(con.execute("select model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at, cwd from sessions"))
+            filas = list(con.execute("select model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at, cwd, billing_provider, billing_base_url from sessions"))
             con.close()
-            for m, i, o, cr, cw, ini, cwd in filas:
-                mete(f"Hermes/{perfil}" + (f" · {ultimos(cwd, 1)}" if cwd else ""), hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
+            for m, i, o, cr, cw, ini, cwd, bprov, burl in filas:
+                mete(f"Hermes/{perfil}" + (f" · {ultimos(cwd, 1)}" if cwd else ""), burl or bprov or "", hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
             nombres.append(f"Hermes/{perfil} ({len(filas)})")
         except Exception as e:
             log(f"hermes {db}: {type(e).__name__}: {e}")
@@ -368,10 +405,11 @@ def escanear():
                 vistos[f] = r
                 nuevos += 1
     proyectos_base, nombres_bases = leer_bases()
-    for proy, datos in proyectos_base.items():
+    for (proy, plan), datos in proyectos_base.items():
         datos["proyecto"] = proy
+        datos["plan"] = plan
         datos["clave"] = "bases"
-        vistos[f"sqlite:{proy}"] = datos
+        vistos[f"sqlite:{proy}|{plan}"] = datos
     estado["ficheros"] = vistos
     guardar_estado(estado)
     r = agregar(vistos, nuevos)
@@ -435,7 +473,7 @@ def agregar(vistos, nuevos=0):
                                                   + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                                   + v[1] * t[1] * (1.5 if over else 1)) / 1e6
                 suma(proys[r.get("proyecto", "otros")], v)
-                pn = proveedor_de(m, provs)
+                pn = proveedor_de(m, provs, r.get("plan"))
                 pp = por_prov[pn]
                 pp["modelos"].add(corto(m))
                 modelo_prov[corto(m)] = pn

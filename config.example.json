@@ -1,5 +1,5 @@
 {
-  "_nota": "Un plan por cuota. 'modelos' agrupa por trozos del nombre del modelo; 'ignorar' quita ruido. Pon limite_5h_tokens / limite_semana_tokens y veras el % consumido.",
+  "_nota": "Cada plan es una cuota. El plan se detecta solo del log (providerID de OpenCode, URL base de Hermes); aqui puedes renombrarlos (aliases), unir modelos y poner cuotas.",
   "limite_hora_tokens": 8000000,
   "ignorar": [
     "synthetic",
@@ -64,5 +64,14 @@
       "limite_5h_tokens": 0,
       "limite_semana_tokens": 0
     }
-  ]
+  ],
+  "aliases": {
+    "zai-coding-plan": "z.ai (coding plan)",
+    "opencode-go": "OpenCode Go",
+    "opencode": "OpenCode (free)",
+    "nan.builders": "NaN",
+    "openrouter": "OpenRouter",
+    "openai": "OpenAI (Codex)",
+    "anthropic": "Claude (Max)"
+  }
 }
