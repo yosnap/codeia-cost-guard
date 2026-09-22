@@ -29,7 +29,7 @@
   },
   "proveedores": [
     {
-      "nombre": "Claude (Max)",
+      "nombre": "Claude (Max) x20",
       "modelos": [
         "claude",
         "sonnet",
@@ -114,14 +114,6 @@
       "tipo": "pago_por_uso",
       "fuente": "https://www.cheaperinference.com/",
       "nota": "Pago por uso desde 5 $, sin compromiso mensual. Descuentos del 40-60 % sobre lista (glm-5.3-flash 55 %, gpt-5.6-luna 60 %, deepseek-v4-flash 41 %). Nunca por encima del precio de lista."
-    },
-    {
-      "nombre": "Claude (Max) x20",
-      "modelos": [],
-      "tipo": "suscripcion",
-      "limite_5h_tokens": 0,
-      "limite_semana_tokens": 0,
-      "nota": "Anthropic no publica cifras (ventana 5 h + semanal); el dato real en Settings > Usage."
     }
   ]
 }
