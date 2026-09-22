@@ -882,9 +882,9 @@ def main():
             self.menu.add(it)
             return it
 
-    _titulo = ""
+        _titulo = ""
 
-    def refrescar(self, _):
+        def refrescar(self, _):
             try:
                 r = escanear()
                 self.r = r
@@ -893,11 +893,9 @@ def main():
                 alto = r["ritmo"]["tok"] >= r["limites"]["limite_hora_tokens"]
                 lim5v = lim5 or 0
                 fraccion = (c5["tok"] / lim5v) if lim5v else (r["ritmo"]["tok"] / (r["limites"]["limite_hora_tokens"] or 1) or 0.34)
-                self._titulo = fmt_tok(c5["tok"])
                 icono = icono_png(os.path.join(AQUI, "icono.png"), fraccion, self._titulo, color_magnitud(c5["tok"]), alto)
                 if icono:
                     self.icon = icono
-                self._titulo = fmt_tok(c5["tok"])
                 self.title = ("" if self.icon else self._titulo) + (" !" if (alto and not self.icon) else "")
                 self.menu.clear()
                 m = self._item
