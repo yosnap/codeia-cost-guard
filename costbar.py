@@ -238,23 +238,83 @@ def fmt_tok(n):
     return str(int(n))
 
 
-def icono_png(destino, fraccion):
-    """Dibuja la barra de la barra de menus: relleno degradado segun la ventana de 5 h."""
+def color_magnitud(v):
+    """Tono segun el tamano: miles de millones mas fuerte que millones."""
+    v = abs(v or 0)
+    if v >= 1e9:
+        return (255, 0, 90)        # miles de millones: rojo fuerte de marca
+    if v >= 1e6:
+        return (174, 0, 255)       # millones: violeta de marca
+    if v >= 1e3:
+        return (110, 90, 200)      # miles: violeta suave
+    return (120, 120, 140)
+
+
+def icono_png(destino, fraccion, texto="", color=None, alerta=False):
+    """Barra de la barra de menus: barra de progreso de la ventana de 5 h + el numero coloreado."""
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFont
     except ImportError:
         return None
-    W, H = 46, 20
+    W, H = 62, 22
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
-    d.rounded_rectangle([0, 0, W - 1, H - 1], radius=5, fill=(150, 140, 175, 60))
+    d.rounded_rectangle([0, 1, W - 1, H - 2], radius=6, fill=(150, 140, 175, 45),
+                        outline=((255, 0, 90, 255) if alerta else None), width=2)
     relleno = int((W - 4) * max(0.0, min(fraccion, 1.0)))
-    for x in range(relleno):
+    for x in range(max(relleno, 0)):
         f = x / max(relleno - 1, 1)
         c = tuple(int(a + (b - a) * f) for a, b in ((0xAE, 0xFF), (0x00, 0x00), (0xFF, 0x8C)))
-        d.line([(2 + x, 3), (2 + x, H - 4)], fill=c + (255,))
+        d.line([(2 + x, 4), (2 + x, H - 5)], fill=c + (255,))
+    if texto:
+        try:
+            fuente = ImageFont.load_default(size=13)
+        except Exception:
+            fuente = ImageFont.load_default()
+        col = color or (60, 60, 70)
+        caja = d.textbbox((0, 0), texto, font=fuente)
+        d.text((W - (caja[2] - caja[0]) - 5, (H - (caja[3] - caja[1])) / 2 - 2), texto, font=fuente, fill=col + (255,))
     im.save(destino)
     return destino
+
+
+def _color_ns(rgb):
+    from AppKit import NSColor
+    return NSColor.colorWithSRGBRed_green_blue_alpha_(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1.0)
+
+
+def _pinta_magnitudes(item):
+    """Colorea una entrada del menu: etiqueta en rosa de marca y los numeros segun su tamano.
+
+    Los menues de macOS son texto plano; hay que ir al NSMenuItem de debajo. Si algo falla,
+    se queda como estaba: nunca debe romper la barra.
+    """
+    try:
+        from AppKit import NSMutableAttributedString, NSForegroundColorAttributeName
+        from Foundation import NSMakeRange
+        ns = getattr(item, "_menuitem", None)
+        if ns is None:
+            return False
+        txt = str(ns.title())
+        if not txt:
+            return False
+        a = NSMutableAttributedString.alloc().initWithString_(txt)
+        i = txt.find(":")
+        if 0 < i < 40 and txt[:i].lower() not in ("5 h", "semana"):
+            a.addAttribute_value_range_(NSForegroundColorAttributeName, _color_ns((255, 0, 140)), NSMakeRange(0, i))
+        for m in re.finditer(r"(\d[\d.,]*)\s*([KMB])\b", txt):
+            n = 0.0
+            try:
+                n = float(m.group(1).replace(".", "").replace(",", "."))
+            except Exception:
+                continue
+            n *= {"K": 1e3, "M": 1e6, "B": 1e9}[m.group(2)]
+            a.addAttribute_value_range_(NSForegroundColorAttributeName, _color_ns(color_magnitud(n)), NSMakeRange(m.start(), len(m.group(0))))
+        ns.setAttributedTitle_(a)
+        return True
+    except Exception as e:
+        log(f"menu sin color: {type(e).__name__}: {e}")
+        return False
 
 
 def log(msg):
@@ -822,7 +882,9 @@ def main():
             self.menu.add(it)
             return it
 
-        def refrescar(self, _):
+    _titulo = ""
+
+    def refrescar(self, _):
             try:
                 r = escanear()
                 self.r = r
@@ -831,10 +893,12 @@ def main():
                 alto = r["ritmo"]["tok"] >= r["limites"]["limite_hora_tokens"]
                 lim5v = lim5 or 0
                 fraccion = (c5["tok"] / lim5v) if lim5v else (r["ritmo"]["tok"] / (r["limites"]["limite_hora_tokens"] or 1) or 0.34)
-                icono = icono_png(os.path.join(AQUI, "icono.png"), fraccion)
+                self._titulo = fmt_tok(c5["tok"])
+                icono = icono_png(os.path.join(AQUI, "icono.png"), fraccion, self._titulo, color_magnitud(c5["tok"]), alto)
                 if icono:
                     self.icon = icono
-                self.title = fmt_tok(c5["tok"]) + (" !" if alto else "")
+                self._titulo = fmt_tok(c5["tok"])
+                self.title = ("" if self.icon else self._titulo) + (" !" if (alto and not self.icon) else "")
                 self.menu.clear()
                 m = self._item
                 # la ventana de 5 horas es el dato que se agota en las suscripciones
