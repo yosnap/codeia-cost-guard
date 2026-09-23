@@ -27,6 +27,22 @@ gasto típico es lectura de caché — o sea, el mismo contexto reenviado turno 
 **272.000 tokens** toda la petición pasa a facturarse a 2× entrada / 1,5× salida. Con esto delante, un
 día de trabajo se ve de un vistazo. El detalle completo, en [GUIA.md](GUIA.md).
 
+## Reglas de ahorro (Claude Code y Codex)
+
+Además de medir, el repo trae las **cinco palancas** de `GUIA.md` ya escritas para pegar en las
+instrucciones globales de tus agentes: contexto por debajo de 200K (nunca cruzar los 272K),
+parches en vez de reescribir el fichero entero, fan-out máximo 3 y solo para tareas ambiguas
+(dispersando entre modelos, no copias del mismo), no tocar el prompt de sistema a mitad de sesión
+(rompe la caché), y Batch para lo asíncrono con Fast apagado. `python3 instalar_reglas_globales.py`
+(o `./install.sh --reglas`) las pega solo en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md` — nunca
+en la memoria de un agente, que se inyecta en cada turno y encarecería el propio remedio. El bloque
+exacto que escribe está en [AGENTS-snippet.md](AGENTS-snippet.md). Es idempotente: puedes
+ejecutarlo cuantas veces quieras y respeta lo que ya tengas alrededor (con copia de seguridad).
+
+Las tarifas de `costbar.py` (para el equivalente USD y el precipicio de los 272K) están puestas al
+día con los modelos frontera actuales de ambos servicios (Claude Opus/Sonnet/Fable 5, GPT-5.6);
+cuando salgan modelos nuevos, hay que añadir su fila en `TARIFAS` dentro de `costbar.py`.
+
 ## Instalación
 
 ```bash
