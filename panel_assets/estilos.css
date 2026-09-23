@@ -1,0 +1,94 @@
+:root[data-tema="claro"]{--fondo:#f4f2f8;--panel:#fff;--borde:#e4dff0;--texto:#1c1726;--suave:#6d6485;--pista:#ece7f5;--sombra:0 1px 3px rgba(30,20,60,.07)}
+:root[data-tema="oscuro"]{--fondo:#0e0b14;--panel:#171226;--borde:#241a3a;--texto:#efeaf7;--suave:#9d93b5;--pista:#0b0813;--sombra:none}
+:root{--marca:#ae00ff;--marca2:#ff008c}
+*{box-sizing:border-box}
+body{margin:0;padding:26px;background:var(--fondo);color:var(--texto);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,sans-serif}
+.cab{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+#tema{font-size:12.5px;padding:6px 12px;color:var(--suave)}
+#tema:hover{color:var(--texto)}
+th .f{opacity:.35;font-size:10px} th.act{color:var(--marca)} th.act .f{opacity:1}
+h1{font-size:20px;margin:0 0 4px} .sub{color:var(--suave);font-size:12.5px}
+button{font:inherit;font-size:13px;padding:7px 12px;border-radius:10px;border:1px solid var(--borde);background:var(--panel);color:var(--texto);cursor:pointer}
+button:hover{border-color:var(--marca)} button.on{background:linear-gradient(90deg,var(--marca),var(--marca2));color:#fff;border-color:transparent}
+.fila-b{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.etq{color:var(--suave);font-size:12px;text-transform:uppercase;letter-spacing:.7px;margin-right:2px}
+.rejilla{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:13px;margin-bottom:14px}
+.tarjeta{background:var(--panel);border:1px solid var(--borde);border-radius:16px;padding:16px 18px;box-shadow:var(--sombra)}
+.tarjeta .rot{font-size:11.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--suave)}
+.tarjeta .num{font-size:30px;font-weight:680;margin-top:5px;background:linear-gradient(90deg,var(--marca),var(--marca2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.tarjeta.g .num{font-size:36px} .tarjeta .pie{font-size:12px;color:var(--suave);margin-top:3px}
+section{background:var(--panel);border:1px solid var(--borde);border-radius:16px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--sombra)}
+h2{font-size:13px;margin:0 0 12px;color:var(--suave);text-transform:uppercase;letter-spacing:.9px}
+.fila{display:grid;grid-template-columns:minmax(130px,34%) 1fr 118px;align-items:center;gap:12px;padding:3.5px 0}
+.et{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pista{background:var(--pista);border-radius:7px;height:15px;overflow:hidden}
+.barra{display:block;height:100%;border-radius:7px;background:linear-gradient(90deg,var(--marca),var(--marca2))}
+.val{text-align:right;font-variant-numeric:tabular-nums;color:var(--suave);font-size:12.5px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--borde);font-variant-numeric:tabular-nums}
+th{color:var(--suave);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;user-select:none}
+th:first-child,td:first-child{text-align:left}
+th:hover{color:var(--marca)}
+.punto{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.auto{font-size:10.5px;color:var(--suave);border:1px solid var(--borde);border-radius:6px;padding:0 5px;margin-left:6px}
+.mat{overflow-x:auto} .mat table{font-size:11.5px}
+footer{color:var(--suave);font-size:12px;margin-top:16px} .vacio{color:var(--suave)}
+
+/* --- pestañas de tipo de grafico (mismo look que los botones de filtro) --- */
+.pestanas{display:flex;gap:6px;margin-bottom:10px}
+.pestanas button{padding:5px 10px;font-size:12px;border-radius:8px;display:inline-flex;align-items:center;gap:5px}
+.pestanas button svg{flex:none}
+
+/* --- graficos SVG: contenido acotado y centrado (si no, se estiran al ancho del panel) --- */
+.grafico-svg{width:100%;max-width:640px;height:auto;overflow:visible;display:block;margin:0 auto}
+.grafico-svg .eje{stroke:var(--borde);stroke-width:1}
+.grafico-svg .etq-eje{fill:var(--suave);font-size:10px}
+.grafico-svg .barra-v{fill:var(--marca);cursor:pointer}
+.grafico-svg .barra-v:hover{opacity:.85}
+.grafico-svg .barra-v.sel{fill:var(--marca2)}
+.grafico-svg .punto-linea.sel{fill:var(--marca2);stroke:var(--marca2);r:5}
+.fila.sel .barra{background:var(--marca2)}
+.fila.sel .et{color:var(--marca2);font-weight:600}
+.grafico-svg .linea{fill:none;stroke:var(--marca);stroke-width:2}
+.grafico-svg .area{fill:var(--marca);opacity:.14}
+.grafico-svg .punto-linea{fill:var(--panel);stroke:var(--marca);stroke-width:2;cursor:pointer}
+.grafico-svg .sector{cursor:pointer;stroke:var(--panel);stroke-width:1.5}
+.grafico-svg .sector:hover{opacity:.85}
+.grafico-svg .etq-valor{fill:var(--texto);font-size:11px;font-variant-numeric:tabular-nums}
+/* tarta/donut: el circulo a un lado, el listado de nombres al otro (no una fila que se envuelve) */
+.tarta-envoltorio{display:flex;gap:24px;align-items:center;justify-content:center;flex-wrap:wrap;padding:4px 0}
+.tarta-envoltorio .grafico-svg{margin:0;flex:none}
+.leyenda-tarta{display:flex;flex-direction:column;gap:7px;font-size:12.5px;max-width:280px}
+.leyenda-tarta .it{display:flex;align-items:center;gap:7px;color:var(--suave);overflow:hidden}
+.leyenda-tarta .it span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.leyenda-tarta .pt{width:9px;height:9px;border-radius:50%;flex:none}
+
+/* --- calendario (mapa de calor): tamano de celda contenido, no todo el ancho del panel --- */
+.calendario{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:360px;margin:0 auto}
+.calendario .celda{aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:var(--suave);cursor:pointer;background:var(--pista);border:1px solid transparent}
+.calendario .celda:hover{border-color:var(--marca)}
+.calendario .celda.sel{border-color:var(--marca2);border-width:2px}
+.calendario .celda.vacia{visibility:hidden;cursor:default}
+.calendario .dow{font-size:10px;color:var(--suave);text-align:center;padding-bottom:2px}
+
+/* --- barras apiladas (por dia, segmentadas por modelo) --- */
+.apiladas{display:flex;align-items:flex-end;gap:4px;height:160px}
+.apiladas .col{flex:1;display:flex;flex-direction:column-reverse;height:100%;cursor:pointer;border-radius:3px 3px 0 0;overflow:hidden}
+.apiladas .col:hover{outline:2px solid var(--marca)}
+.apiladas .col.sel{outline:2px solid var(--marca2)}
+.etqs{display:flex;gap:4px;margin-top:4px}
+.etqs span{flex:1;text-align:center;font-size:9.5px;color:var(--suave)}
+
+/* --- layout con panel de detalle lateral --- */
+.zona{display:grid;grid-template-columns:1fr;gap:14px}
+.zona.con-detalle{grid-template-columns:1fr 300px}
+@media (max-width:900px){.zona.con-detalle{grid-template-columns:1fr}}
+#detalle-dia{background:var(--panel);border:1px solid var(--marca);border-radius:16px;padding:16px 18px;
+  box-shadow:var(--sombra);align-self:start;position:sticky;top:16px}
+#detalle-dia h3{font-size:13px;margin:0 0 4px;text-transform:uppercase;letter-spacing:.8px;color:var(--marca)}
+#detalle-dia .cerrar{float:right;cursor:pointer;color:var(--suave);font-size:16px;line-height:1}
+#detalle-dia .cerrar:hover{color:var(--texto)}
+#detalle-dia h4{font-size:11px;margin:14px 0 6px;color:var(--suave);text-transform:uppercase;letter-spacing:.6px}
+#detalle-dia .linea-det{display:flex;justify-content:space-between;font-size:12.5px;padding:2px 0}
+#detalle-dia .linea-det span:last-child{font-variant-numeric:tabular-nums;color:var(--suave)}

@@ -20,7 +20,9 @@ HOME = os.path.expanduser("~")
 STATE = f"{AQUI}/state.json"
 CONFIG = f"{AQUI}/config.json"
 LOG = f"{AQUI}/logs/costbar.log"
-FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions", f"{HOME}/.local/share/opencode"]
+FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions"]
+# OpenCode no va aqui: guarda su consumo en SQLite (ver leer_bases()), no en .jsonl/.json;
+# barrer su carpeta solo encontraba auth.json (credenciales) y diffs internos, sin datos de uso.
 DIAS = 31
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
 VERSION_ESTADO = 9          # subir cuando cambie el formato del cache: obliga a reescanear
@@ -554,11 +556,17 @@ def leer_bases():
     return proyectos, nombres
 
 
+NOMBRE_FUENTE = {f"{HOME}/.claude/projects": "Claude Code", f"{HOME}/.codex/sessions": "Codex"}
+
+
 def escanear():
     estado = leer_estado()
     vistos, nuevos = {}, 0
+    nombres_fuentes = []
     for base in FUENTES:
         ficheros = glob.glob(f"{base}/**/*.jsonl", recursive=True) + glob.glob(f"{base}/**/*.json", recursive=True)
+        if ficheros:
+            nombres_fuentes.append(f"{NOMBRE_FUENTE.get(base, base)} ({len(ficheros)})")
         for f in ficheros:
             try:
                 st = os.stat(f)
@@ -585,7 +593,7 @@ def escanear():
     guardar_estado(estado)
     r = agregar(vistos, nuevos)
     r["fuentes"] = r["fuentes"] + len(nombres_bases)
-    r["bases"] = nombres_bases
+    r["bases"] = nombres_fuentes + nombres_bases
     return r
 
 
@@ -616,6 +624,8 @@ def agregar(vistos, nuevos=0):
     por_prov = collections.defaultdict(lambda: {"cinco_h": 0, "semana": 0, "hoy": 0, "mes": 0, "modelos": set()})
     cruce = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))
     proy_prov = collections.defaultdict(lambda: collections.defaultdict(int))
+    # como cruce, pero por proyecto en vez de por modelo: hace falta para el detalle por dia/tramo del panel
+    proy_cruce = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))
     modelo_prov = {}
     origenes = collections.defaultdict(int)
     ahora = time.time()
@@ -655,6 +665,7 @@ def agregar(vistos, nuevos=0):
                 cruce[pn][corto(m)][d] += tokv
                 origenes[str(r.get("plan") or "(sin origen)")] += tokv
                 proy_prov[pn][r.get("proyecto", "otros")] += tokv
+                proy_cruce[pn][r.get("proyecto", "otros")][d] += tokv
                 if d >= hace7:
                     pp["semana"] += tokv
                 if d >= hace30:
@@ -736,6 +747,7 @@ def agregar(vistos, nuevos=0):
             "proveedores": provs_out,
             "cruce": {n: {m: dict(v) for m, v in d2.items()} for n, d2 in cruce.items()},
             "proy_prov": {n: dict(v) for n, v in proy_prov.items()},
+            "proy_cruce": {n: {p: dict(dd) for p, dd in mm.items()} for n, mm in proy_cruce.items()},
         "modelo_prov": modelo_prov,
         "origenes": dict(origenes),
         "config": cfg(),

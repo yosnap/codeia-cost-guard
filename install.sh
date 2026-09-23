@@ -13,6 +13,12 @@ for f in costbar.py barra.py popover.py panel.py costbar.css analizar_gasto.py \
          precio_astra.py instalar_reglas_globales.py GUIA.md AGENTS-snippet.md; do
   [ -f "$AQUI/$f" ] && cp "$AQUI/$f" "$DESTINO/$f"
 done
+if [ -d "$AQUI/panel_assets" ]; then
+  mkdir -p "$DESTINO/panel_assets"
+  for f in "$AQUI"/panel_assets/*.css "$AQUI"/panel_assets/*.js "$AQUI"/panel_assets/*.html; do
+    [ -f "$f" ] && cp "$f" "$DESTINO/panel_assets/"
+  done
+fi
 # config.json no se pisa: si ya existe trae tus cuotas y notas por proveedor (como state.json)
 [ -f "$DESTINO/config.json" ] || cp "$AQUI/config.json" "$DESTINO/config.json"
 [ -f "$DESTINO/state.json" ] || echo "{}" > "$DESTINO/state.json"
