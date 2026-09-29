@@ -60,6 +60,47 @@ python3 panel.py               # genera panel.html y lo abres en el navegador
 En macOS, `install.sh` deja la app arrancando sola al iniciar sesión. Para pegar además las reglas de
 ahorro en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md`: `./install.sh --reglas`.
 
+### Windows
+
+`install.sh` no corre en Windows (es un script de shell que instala un icono de barra de menús y un
+LaunchAgent, ambos exclusivos de macOS). Lo que sí funciona igual que en macOS y Linux es el motor de
+medición, con Python 3.9+ desde `cmd.exe`, PowerShell o la terminal de Git Bash:
+
+```powershell
+git clone https://github.com/yosnap/codeia-cost-guard.git
+cd codeia-cost-guard
+python analizar_gasto.py
+python panel.py
+```
+
+`panel.py` genera `panel.html` en la carpeta del proyecto; ábrelo haciendo doble clic o con
+`start panel.html`. Si quieres el informe cada día sin lanzarlo a mano, prográmalo con el
+**Programador de tareas** de Windows apuntando a `python.exe` con el script como argumento.
+
+Nota: si usas OpenCode en Windows, esta herramienta busca su base de datos en la ruta de Linux/macOS
+(`~/.local/share/opencode/`). En Windows, OpenCode guarda sus datos en otra carpeta y de momento no se
+lee ahí — Claude Code y Codex sí se detectan igual en los tres sistemas.
+
+## Compatibilidad por sistema
+
+| Componente | macOS | Linux | Windows |
+|---|---|---|---|
+| `analizar_gasto.py` (informe en terminal) | ✅ | ✅ | ✅ |
+| `panel.py` (panel HTML) | ✅ | ✅ | ✅ |
+| `precio_astra.py` (calculadora de precios) | ✅ | ✅ | ✅ |
+| Icono de barra de menús + desplegable (`install.sh`, `barra.py`) | ✅ | ❌ (no hay barra de menús equivalente) | ❌ |
+| Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | — (usa el Programador de tareas si quieres algo similar) |
+| Lectura de logs de Claude Code / Codex | ✅ | ✅ | ✅ |
+| Lectura de consumo de OpenCode | ✅ | ✅ | ⚠️ ruta de datos distinta, no detectado todavía |
+
+Verificado ejecutando el medidor con `$HOME` vacío (instalación limpia, sin historial previo) además
+de con historial real.
+
+## Contribuir
+
+Ver [CONTRIBUTING.md](CONTRIBUTING.md): cómo preparar el entorno, qué tipo de cambios encajan en el
+repo y el estilo de commits y de PRs que se usa aquí.
+
 ## Qué trae
 
 - **`costbar.py`** — la app de barra de menús (macOS). Muestra el gasto de hoy y, al clicarla, el ritmo

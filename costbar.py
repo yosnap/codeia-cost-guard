@@ -711,12 +711,12 @@ def agregar(vistos, nuevos=0):
                         "pct_5h": (x["cinco_h"] / l5 * 100) if l5 else 0.0,
                         "pct_semana": (x["semana"] / ls * 100) if ls else 0.0}
     def agrega(filtro):
-        acc = collections.defaultdict(float)
+        acc = vacio()
         for d, x in dias.items():
             if d and filtro(d):
-                for k in ("gi", "go", "cr", "cw", "tok", "turnos", "usd"):
+                for k in acc:
                     acc[k] += x[k]
-        return dict(acc)
+        return acc
     semana = agrega(lambda d: d >= hace7)
     mes = agrega(lambda d: d >= hace30)
     # Un modelo puede servir a dos planes (deepseek por NaN y por OpenRouter): se muestra
