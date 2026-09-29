@@ -13,4 +13,4 @@ import costbar
 r = costbar.escanear()
 print(costbar.informa(r))
 print(f"\nficheros reescaneados en esta pasada: {r['nuevos']} · limite ritmo {r['limites']['limite_hora_tokens']:,.0f} tokens/h")
-print("modelos hoy (detalle):", " · ".join(f"{k}={v:.2f}" for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1])))
+print("modelos hoy (detalle):", " · ".join(f"{k}={v['tok']:.0f}" for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1]["tok"])))
