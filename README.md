@@ -1,6 +1,6 @@
 # codeia-cost-guard
 
-Mide (y ayuda a frenar) el gasto de tokens de tu flota de agentes: **Claude Code, Codex, OpenCode**.
+Mide (y ayuda a frenar) el gasto de tokens de tu flota de agentes: **Claude Code, Codex, OpenCode, pi**.
 Lee sus logs locales, descarta los turnos duplicados, y te lo enseña en un panel y en un icono de la
 barra de menús. Todo en **tokens**: la **ventana de 5 horas** (la que se agota en las suscripciones), la
 **semana**, el día, los turnos y la caché. Los dólares van solo como equivalente API informativo.

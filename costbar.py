@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CostBar - consumo de tokens de la flota de agentes, en la barra de menus del Mac.
 
-Lee los logs de Claude Code / Codex / OpenCode y muestra, en primer plano, **tokens**: entrada,
+Lee los logs de Claude Code / Codex / OpenCode / pi (agent) y muestra, en primer plano, **tokens**: entrada,
 salida, cache leida y cache escrita, mas los turnos, la **ventana de 5 horas** (la que se agota en
 las suscripciones) y la **semana**. Los dolares quedan solo como referencia (equivalente API),
 porque con suscripcion no se paga por token.
@@ -13,7 +13,7 @@ Uso:
     ./venv/bin/python costbar.py --print      # imprime el informe y sale (sin GUI)
     ./venv/bin/python costbar.py              # icono en la barra de menus
 """
-import collections, glob, hashlib, json, os, re, sqlite3, subprocess, sys, time, urllib.parse
+import collections, datetime, glob, hashlib, json, os, re, sqlite3, subprocess, sys, time, urllib.parse
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
@@ -21,6 +21,7 @@ STATE = f"{AQUI}/state.json"
 CONFIG = f"{AQUI}/config.json"
 LOG = f"{AQUI}/logs/costbar.log"
 FUENTES = [f"{HOME}/.claude/projects", f"{HOME}/.codex/sessions"]
+PI_DIR = f"{HOME}/.pi/agent/sessions"   # sesiones de pi (JSONL); ver parsear_pi()
 # OpenCode no va aqui: guarda su consumo en SQLite (ver leer_bases()), no en .jsonl/.json;
 # barrer su carpeta solo encontraba auth.json (credenciales) y diffs internos, sin datos de uso.
 DIAS = 31
@@ -57,6 +58,7 @@ ALIAS_DEFECTO = {
     "zai-coding-plan": "z.ai (coding plan)", "zai": "z.ai (coding plan)", "z-ai": "z.ai (coding plan)",
     "opencode-go": "OpenCode Go", "opencode": "OpenCode Go",
     "nan.builders": "NaN", "nan": "NaN", "openrouter": "OpenRouter",
+    "nodeclub": "nodeclub.ai",
     "anthropic": "Claude (Max)", "openai": "OpenAI (Codex)",
     "codex": "OpenAI (Codex)", "google": "Google", "gemini": "Google",
 }
@@ -462,6 +464,108 @@ def parsear(ruta):
             "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy, "plan": ccs or plan}
 
 
+def _dia_hora():
+    """Registros vacios de una fuente: {dia, turnos, horas} (mismo formato que parsear/leer_bases)."""
+    return {"dia": collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0])),
+            "turnos": collections.defaultdict(int),
+            "horas": collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)})}
+
+
+def _funde(dest, src):
+    """Suma un registro de _dia_hora() en otro (para unir varias sesiones en el mismo plan/proyecto)."""
+    for d, mods in src["dia"].items():
+        for m, v in mods.items():
+            a = dest["dia"][d][m]
+            for i in range(4):
+                a[i] += v[i]
+    for d, n in src["turnos"].items():
+        dest["turnos"][d] += n
+    for h, v in src["horas"].items():
+        dd = dest["horas"][h]
+        dd["tok"] += v.get("tok", 0)
+        dd["usd"] += v.get("usd", 0.0)
+        for m, t in (v.get("mod") or {}).items():
+            dd["mod"][m] += t
+
+
+def parsear_pi(ruta):
+    """Sesion de pi (agent): JSONL con un cabecera {type:session, cwd} y una linea por mensaje.
+
+    Formato (igual que el lector de nodeclub-tracker): los turnos son mensajes assistant con
+    message.usage = {input, output, cacheRead, cacheWrite, reasoning, cost:{total}}. `reasoning`
+    NO va dentro de `output` (totalTokens = input+output), asi que se suma a la salida. Los
+    timestamps van en UTC (iso con Z) y hay que pasarlos a hora local para no descuadrar el dia.
+    Cada turno lleva su `provider` (nodeclub, anthropic, opencode-go, ...) y una misma sesion
+    puede cambiar de proveedor a mitad, asi que se devuelven los registros por proveedor:
+    {"proyecto": "pi · <proyecto>", "proveedores": {provider: {dia, turnos, horas}}}.
+    """
+    cwd, provs = None, None
+    try:
+        fh = open(ruta, encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+    vistos = set()
+    for linea in fh:
+        try:
+            d = json.loads(linea)
+        except Exception:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if d.get("type") == "session" and not cwd:
+            cwd = d.get("cwd") or None
+            if provs is None:
+                provs = collections.OrderedDict()
+        m = d.get("message")
+        if not (isinstance(m, dict) and m.get("role") == "assistant" and isinstance(m.get("usage"), dict)):
+            continue
+        uso = m["usage"]
+        ts = d.get("timestamp") or m.get("timestamp") or ""
+        try:
+            when = datetime.datetime.fromisoformat(str(ts))
+        except Exception:
+            when = None
+        if when is not None and when.tzinfo is not None:
+            when = when.astimezone()                      # UTC -> hora local
+            ts = when.strftime("%Y-%m-%dT%H:%M:%S")
+        gi = uso.get("input", 0) or 0
+        go = (uso.get("output", 0) or 0) + (uso.get("reasoning", 0) or 0)
+        cr = uso.get("cacheRead", 0) or 0
+        cw = uso.get("cacheWrite", 0) or 0
+        modelo = m.get("model") or "sin-modelo"
+        clave = f"{modelo}|{ts[:19]}|{gi}|{go}|{cr}|{cw}"     # si un turno se repitiera, no contar dos veces
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        prov = (m.get("provider") or "").strip() or "sin-proveedor"
+        if prov not in provs:
+            provs[prov] = _dia_hora()
+        rec = provs[prov]
+        if len(ts) >= 10:
+            a = rec["dia"][ts[:10]][modelo]
+            a[0] += gi; a[1] += go; a[2] += cr; a[3] += cw
+            rec["turnos"][ts[:10]] += 1
+        if len(ts) >= 13:
+            tok = gi + go + cr + cw
+            rec["horas"][ts[:13]]["tok"] += tok
+            rec["horas"][ts[:13]]["mod"][modelo] += tok
+            costo = ((uso.get("cost") or {}).get("total")) or 0     # pi ya trae el coste del turno (0 en planes planos)
+            if costo:
+                rec["horas"][ts[:13]]["usd"] += costo
+            elif (t := tarifa(modelo)):
+                over = gi > CLIFF
+                rec["horas"][ts[:13]]["usd"] += (max(gi - cr, 0) * t[0] * (2 if over else 1)
+                                                 + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
+                                                 + go * t[1] * (1.5 if over else 1)) / 1e6
+    fh.close()
+    if provs is None or not any(r["turnos"].values() for r in provs.values()):
+        return None
+    if not cwd:
+        cwd = os.path.basename(os.path.dirname(ruta))     # la carpeta lleva el cwd slugificado
+    trozos = [x for x in (cwd or "").split("/") if x]
+    return {"proyecto": f"pi · {'/'.join(trozos[-2:]) or 'sin proyecto'}", "proveedores": provs}
+
+
 def leer_bases():
     """OpenCode y Hermes no escriben .jsonl: guardan el consumo en SQLite.
 
@@ -583,7 +687,42 @@ def escanear():
                 r["clave"] = clave
                 vistos[f] = r
                 nuevos += 1
+    # pi (agent): JSONL en ~/.pi/agent/sessions; cada sesion puede cambiar de proveedor a mitad,
+    # asi que parsear_pi devuelve registros por provider y aqui se unen en pi:<proyecto>|<plan>.
+    # El analisis va cacheado por fichero en estado["pi"] (los jsonl de pi pueden ser grandes).
+    ficheros_pi = glob.glob(f"{PI_DIR}/**/*.jsonl", recursive=True) if os.path.isdir(PI_DIR) else []
+    cache_pi = estado.get("pi") or {}
+    for f in list(cache_pi):
+        if f not in ficheros_pi:
+            del cache_pi[f]
+    recs_pi = {}
+    for f in ficheros_pi:
+        try:
+            st = os.stat(f)
+        except OSError:
+            continue
+        clave = f"{int(st.st_mtime)}:{st.st_size}"
+        prev = cache_pi.get(f)
+        if prev and prev.get("clave") == clave:
+            datos = prev.get("datos")
+        else:
+            datos = parsear_pi(f)
+            cache_pi[f] = {"clave": clave, "datos": datos}
+        if not datos:
+            continue
+        for prov, rec in datos["proveedores"].items():
+            k = f"pi:{datos['proyecto']}|{prov}"
+            if k not in recs_pi:
+                recs_pi[k] = _dia_hora()
+            _funde(recs_pi[k], rec)
+    estado["pi"] = cache_pi
+    for k, rec in recs_pi.items():
+        proy, plan = k[3:].split("|", 1)
+        rec["proyecto"], rec["plan"], rec["clave"] = proy, plan, "pi"
+        vistos[k] = rec
     proyectos_base, nombres_bases = leer_bases()
+    if ficheros_pi:
+        nombres_bases.append(f"pi ({len(ficheros_pi)})")
     for (proy, plan), datos in proyectos_base.items():
         datos["proyecto"] = proy
         datos["plan"] = plan

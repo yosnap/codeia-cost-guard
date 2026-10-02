@@ -39,6 +39,11 @@ números sirven igual, porque miden lo mismo que consume la cuota: **tokens × t
 
 - **Claude Code, Codex, OpenCode locales**: en sus logs (`~/.claude`, `~/.codex`, `~/.opencode`). Esto
   es lo que lee el medidor.
+- **pi (agent)**: en sus sesiones JSONL (`~/.pi/agent/sessions/<proyecto>/*.jsonl`). Cada turno
+  asistente lleva su `provider` (p. ej. `nodeclub`, `anthropic`, `opencode-go`), y una misma sesión
+  puede cambiar de proveedor a mitad; el medidor cuenta cada turno con su plan real, asi que el
+  consumo de Node Club sale como el plan `nodeclub.ai`. Los timestamps de pi van en UTC y se
+  convierten a hora local antes de agrupar por día.
 - **Agentes que corren en la nube** (tareas en la nube, VPS, CI): **no** dejan log en tu Mac. Hay que
   ejecutar el mismo medidor en esas máquinas y sumar.
 - **Hermes**: guarda su consumo real en `~/.hermes/profiles/<perfil>/state.db` (tablas `sessions` y
