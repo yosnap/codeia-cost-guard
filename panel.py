@@ -101,6 +101,7 @@ def construye(d):
     app_js = _leer("app.js").replace("__DATOS__", json.dumps(d, ensure_ascii=False))
     graficos_js = _leer("graficos.js")
     html = f"""<!doctype html><html lang="es" data-tema="claro"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="60"><title>Consumo de tokens</title>
 <style>
 {estilos}

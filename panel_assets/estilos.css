@@ -92,3 +92,21 @@ footer{color:var(--suave);font-size:12px;margin-top:16px} .vacio{color:var(--sua
 #detalle-dia h4{font-size:11px;margin:14px 0 6px;color:var(--suave);text-transform:uppercase;letter-spacing:.6px}
 #detalle-dia .linea-det{display:flex;justify-content:space-between;font-size:12.5px;padding:2px 0}
 #detalle-dia .linea-det span:last-child{font-variant-numeric:tabular-nums;color:var(--suave)}
+
+/* --- movil: solo reparto del espacio; mismos colores, tipografias y componentes --- */
+/* la rejilla 1fr no deja que su contenido la ensanche; y sin dia elegido no se pinta el marco vacio */
+.zona>div{min-width:0}
+#detalle-dia:empty{display:none}
+@media (max-width:600px){
+  body{padding:14px}
+  .rejilla{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .tarjeta{padding:12px 14px;min-width:0}
+  .tarjeta .num,.tarjeta.g .num{font-size:26px}
+  section{padding:14px;overflow-x:auto}
+  .fila{grid-template-columns:minmax(80px,30%) minmax(0,1fr) 76px;gap:8px}
+  .pestanas{overflow-x:auto;scrollbar-width:none}
+  .pestanas button{flex:none}
+  .fila-b button{padding:8px 12px}
+  .calendario{max-width:100%}
+  th,td{padding:6px 6px;white-space:nowrap}
+}
