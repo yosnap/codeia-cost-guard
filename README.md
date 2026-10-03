@@ -173,6 +173,17 @@ lista de cada modelo.
 que se agota es lo mismo que aquí se mide — *tokens × turnos*. Los agentes que corren en la nube no
 dejan log en tu máquina: ejecuta el medidor **en esas máquinas** y suma los totales.
 
+## Tests
+
+```bash
+python3 -m unittest discover tests   # sin dependencias: unittest de la libreria estandar
+```
+
+Cubren `a_local()` (UTC con Z a hora local, verano/invierno, offsets, cadenas rotas), la
+conversion de horas/dias a local en `parsear()`, el doble registro de Codex (mismo segundo,
+un turno) y el lector de pi (reasoning, dedup, claves locales). Se fija `TZ=Europe/Madrid`
+para que los resultados sean deterministas en cualquier maquina.
+
 ## Licencia
 
 MIT.
