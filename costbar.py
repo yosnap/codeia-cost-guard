@@ -26,7 +26,7 @@ PI_DIR = f"{HOME}/.pi/agent/sessions"   # sesiones de pi (JSONL); ver parsear_pi
 # barrer su carpeta solo encontraba auth.json (credenciales) y diffs internos, sin datos de uso.
 DIAS = 31
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
-VERSION_ESTADO = 9          # subir cuando cambie el formato del cache: obliga a reescanear
+VERSION_ESTADO = 10         # subir cuando cambie el formato del cache: obliga a reescanear
 
 # tarifas USD/1M: (entrada, salida, cache_leida, escritura_cache) — solo para el equivalente API
 TARIFAS = {
@@ -381,6 +381,20 @@ def _hallar_uso(o, p=0):
     return None
 
 
+def a_local(ts):
+    """Pasa un ISO con zona ('...Z' o '+02:00') a hora local sin zona. Las claves de dia y hora
+    se leen luego con mktime como hora local; si se quedaran en UTC saldrian desplazadas.
+    (parsear_pi ya lo hacia inline; Claude/Codex traen timestamps UTC con Z.)"""
+    ts = str(ts or "")
+    if not (ts.endswith("Z") or re.search(r"[+-]\d\d:?\d\d$", ts[19:])):
+        return ts
+    try:
+        dt = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return ts
+
+
 def parsear(ruta):
     """Devuelve {dia: {modelo: [gi,go,cr,cw]}, turnos: {dia: n}, horas: {'YYYY-MM-DDTHH': {'tok','usd','fam'}}, proyecto: slug}
 
@@ -417,7 +431,7 @@ def parsear(ruta):
             d = json.loads(linea)
         except Exception:
             continue
-        ts = str(d.get("timestamp") or d.get("ts") or "")
+        ts = a_local(d.get("timestamp") or d.get("ts") or "")
         uso = _hallar_uso(d)
         if not uso:
             continue
@@ -598,7 +612,7 @@ def leer_bases():
     def mete(proyecto, plan, ts, modelo, gi, go, cr, cw):
         if not ts or len(str(ts)) < 10:
             return
-        ts = str(ts)
+        ts = a_local(ts)
         proy = saca((proyecto or "Hermes/OpenCode", plan or ""))
         k = limpia_modelo(modelo) or "sin-modelo"
         a = proy["dia"][ts[:10]][k]
