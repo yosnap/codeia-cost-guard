@@ -112,13 +112,17 @@ def bastionado(d, expuestos, permitidos=(), correo=""):
             # hay un servidor de correo, pero en Ajustes se ha dicho que no se acepten sus puertos
             arreglo = (f"{', '.join(map(str, de_correo))} son del correo ({detectado}): si lo usas, marca «Servidor de correo» en Ajustes > "
                        "Servidores; si no, ciérralos")
+        elif de_correo and detectado and correo:
+            # hay correo, pero estos puertos no los sirve el software detectado (p. ej. un 993 con solo Postfix)
+            arreglo = (f"{', '.join(map(str, de_correo))} abiertos, pero {detectado} no los sirve: ciérralos o revisa qué los usa. "
+                       "sudo bash cerrar-puerto-docker.sh <puerto> (infobar/remoto) o el cortafuegos del proveedor")
         elif de_correo and not detectado:
             arreglo = (f"cerrar {', '.join(map(str, raros))}: infobar no ve ningún servidor de correo en marcha que los use. "
                        "sudo bash cerrar-puerto-docker.sh <puerto> (infobar/remoto) o el cortafuegos del proveedor")
         else:
             arreglo = (f"cerrar {', '.join(map(str, raros))}: sudo bash cerrar-puerto-docker.sh <puerto> "
                        "(infobar/remoto; docker se salta ufw) o en el cortafuegos del proveedor"
-                       + (". Para el correo bastan 25/465/587/993: 110 y 143 van sin cifrar" if correo and {110, 143} & set(raros) else ""))
+                       + (". Para el correo bastan 25/465/587/993/995: 110 y 143 van sin cifrar" if correo and {110, 143} & set(raros) else ""))
         mete("puertos", not raros,
              f"solo 22/80/443 y los del correo ({correo}) abiertos a Internet" if correo else "solo 22/80/443 abiertos a Internet", arreglo)
     if "auto_upgrades" in b:

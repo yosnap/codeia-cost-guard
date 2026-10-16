@@ -325,8 +325,23 @@ class ScriptRealTest(ScriptBase):
 
     def test_version_y_cierre_global(self):
         salida = self.ejecuta(FAKE_JOURNAL=self.diario([]))
-        self.assertTrue(salida.startswith("### version\n2\n"))
+        self.assertTrue(salida.startswith("### version\n3\n"))
         self.assertTrue(salida.rstrip().endswith("### fin"))
+
+    def test_cola_opcional_correo_y_espera_antes_del_fin(self):
+        # systemctl y apt-get falsos: postfix activo y 2 paquetes que `apt upgrade` instalaría
+        for nombre, cuerpo in (("systemctl", 'for u in "${@:2}"; do [ "$u" = postfix ] && echo active || echo inactive; done\n'),
+                               ("apt-get", 'printf "Inst a (1)\\nInst b (2)\\nConf a\\n"\n')):
+            ruta = os.path.join(self.dir, nombre)
+            with open(ruta, "w") as f:
+                f.write("#!/bin/bash\n" + cuerpo)
+            os.chmod(ruta, 0o755)
+        salida = self.ejecuta(FAKE_JOURNAL=self.diario([]))
+        sec, _, _, completa = ss.analizar(salida)
+        self.assertTrue(completa)
+        self.assertEqual(sec["correo"], ["postfix"])
+        self.assertEqual(sec["espera"], ["instalables 2"])
+        self.assertLess(salida.index("### espera"), salida.index("### fin"))
 
     def test_sin_unidad_es_sin_dato(self):
         salida = self.ejecuta(FAKE_SIN_UNIDAD="1", FAKE_JOURNAL=self.diario([]))

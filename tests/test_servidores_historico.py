@@ -372,6 +372,17 @@ class MantenimientoTest(Base):
         sh.caducar_copias(carpeta, ahora=time_now() + 31 * 86400)
         self.assertFalse(os.path.exists(destino))                         # caduca sola, sin esperar a otra migración
 
+    def test_copia_previa_sin_restos_de_muchas_ips_borradas(self):
+        # con miles de filas, un DELETE deja las IPs en páginas libres: solo el VACUUM en memoria las quita antes de escribir a disco
+        self.reg(entrada(T0, [(A, 5)]))
+        self.con.executemany("INSERT INTO ips_atacantes VALUES (?, ?, ?, ?, 1, 1, ?)",
+                             [(SID, f"198.51.{i // 250}.{i % 250}", T0, T0, T0) for i in range(5000)])
+        destino = sh.copia_sin_ips(self.con, os.path.join(self.dir, "copias"))
+        with open(destino, "rb") as f:
+            datos = f.read()
+        self.assertNotIn(b"198.51.", datos)
+        self.assertNotIn(A.encode(), datos)
+
     def test_mantener_caduca_las_copias_previas(self):
         carpeta = os.path.join(self.dir, "copias")
         os.makedirs(carpeta)

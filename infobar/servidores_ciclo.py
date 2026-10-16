@@ -84,10 +84,14 @@ def recoger_uno(servidor, conocidas):
     if error:
         return {"error": error, "duracion": dur, "webs": webs, "host": host, "estado": "rojo", "estado_vivo": "rojo"}
     permitidos = {int(servidor.get("puerto") or 22)}       # el ssh en otro puerto no es "raro"
-    # con un servidor de correo en marcha, sus puertos son legítimos (salvo que en Ajustes se desmarque)
+    # con un servidor de correo en marcha, LOS PUERTOS QUE ÉL SIRVE son legítimos (salvo que en Ajustes se desmarque). `correo: true` en
+    # la configuración los acepta todos aunque no se reconozca el software (un compose llamado «mx», por ejemplo)
     correo = datos.get("correo", "") if servidor.get("correo") is not False else ""
-    if correo:
+    if servidor.get("correo") is True:
+        correo = correo or "a mano"
         permitidos |= PUERTOS_CORREO
+    elif correo:
+        permitidos |= set(datos.get("correo_puertos") or []) & PUERTOS_CORREO
     t = tarjetas(datos, webs, expuestos, conocidas, permitidos, correo)
     checks = bastionado(datos, expuestos, permitidos, correo)
     res = resumen_bastionado(checks)

@@ -16,7 +16,7 @@ VIGILANTE=$!
 trap 'kill $VIGILANTE 2>/dev/null' EXIT
 
 echo "### version"
-echo 2
+echo 3                                             # 3 = 2 + las secciones opcionales del final (correo, espera)
 
 echo "### sistema"
 t cat /proc/loadavg
@@ -126,14 +126,17 @@ fi
 # - espera: cuantos paquetes instalaria `apt upgrade` de verdad (simulado, sin root; tarda 1-2 s). El resto de los
 #   «upgradable» estan en espera: actualizaciones por fases de Ubuntu o retenidos (p. ej. un salto de version de docker).
 # Sin tiempo, la seccion no sale y el Mac se queda con lo de siempre.
-if [ "$(resta 12)" -ge 1 ]; then
+# Todo acaba antes del segundo 13 (el vigilante corta a los 14): sin «### fin» la lectura entera se da por incompleta.
+if [ "$(resta 9)" -ge 2 ]; then
   echo "### correo"
-  for u in postfix dovecot exim4 opensmtpd; do
-    [ "$(timeout 1 systemctl is-active "$u" </dev/null 2>/dev/null)" = active ] && echo "$u"
-  done
+  UNIDADES_CORREO="postfix dovecot exim4 opensmtpd"
+  # una sola llamada: systemctl responde una linea por unidad, en el mismo orden
+  timeout -k 1 2 systemctl is-active $UNIDADES_CORREO </dev/null 2>/dev/null \
+    | paste -d' ' <(printf '%s\n' $UNIDADES_CORREO) - | awk '$2 == "active" {print $1}'
 fi
 lim=$(resta 12)
-if [ "$lim" -ge 3 ] && sim=$(timeout "$lim" apt-get -s -o Debug::NoLocking=1 upgrade </dev/null 2>/dev/null); then
+# --with-new-pkgs: lo mismo que `apt upgrade` (un kernel nuevo no queda «retenido»)
+if [ "$lim" -ge 3 ] && sim=$(timeout -k 1 "$lim" apt-get -s -o Debug::NoLocking=1 --with-new-pkgs upgrade </dev/null 2>/dev/null); then
   echo "### espera"
   echo "instalables $(printf '%s\n' "$sim" | grep -c '^Inst ')"
 fi

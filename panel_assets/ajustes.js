@@ -445,7 +445,7 @@
         div.querySelectorAll("[data-k]").forEach(i => {
           const k = i.dataset.k, v = i.value.trim();
           if (k === "avisos") { if (i.checked) delete s.avisos; else s.avisos = false; }
-          else if (k === "correo") { if (i.checked) delete s.correo; else s.correo = false; }
+          else if (k === "correo") { if (!i.checked) s.correo = false; else if (s.correo !== true) delete s.correo; }      // un «true» puesto a mano se conserva
           else if (k === "puerto") { if (v) s.puerto = parseInt(v, 10) || v; else delete s.puerto; }
           else if (v || k === "nombre" || k === "ssh") s[k] = v; else delete s[k];
         });

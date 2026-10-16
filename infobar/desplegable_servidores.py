@@ -141,7 +141,9 @@ def _puertas(exp, tp):
         return cifra, f'¡{", ".join(map(str, raros))} expuesto!'
     if de_correo:
         return cifra, f'+ correo ({correo})'
-    return cifra, "abiertas a Internet" if len(grandes) <= MAX_PUERTOS_GRANDES else "·".join(map(str, exp))
+    if len(grandes) <= MAX_PUERTOS_GRANDES:
+        return cifra, "abiertas a Internet"
+    return cifra, "·".join(map(str, exp[:6])) + ("…" if len(exp) > 6 else "")
 
 
 def _cpu_texto(pct):

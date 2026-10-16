@@ -108,8 +108,10 @@ def _vivo(e, ahora, normal):
             "bastionado": {"hechos": _num(res.get("hechos")), "total": _num(res.get("total")), "estado": res.get("estado"),
                            "falta": [{"texto": _texto(c.get("texto")), "arreglo": _texto(c.get("arreglo"), 400)}
                                      for c in (e.get("bastionado") or []) if isinstance(c, dict) and c.get("ok") is False][:20]},
-            "actualizaciones": {"pendientes": _num(act.get("pendientes")), "reinicio": bool(act.get("reinicio"))},
-            "servicios": [{"nombre": _texto(x.get("nombre")), "ok": bool(x.get("ok"))} for x in (d.get("servicios") or []) if isinstance(x, dict)][:60]}
+            "actualizaciones": {"pendientes": _num(act.get("pendientes")), "reinicio": bool(act.get("reinicio")), "en_espera": _num(act.get("en_espera"))},
+            "correo": _texto((t.get("puertos") or {}).get("correo")),
+            "servicios": [{"nombre": _texto(x.get("nombre")), "ok": bool(x.get("ok")), "parado": bool(x.get("parado"))}
+                          for x in (d.get("servicios") or []) if isinstance(x, dict)][:60]}
 
 
 def atiende(q, ahora=None, conf=None):

@@ -117,18 +117,43 @@ class RevisionCodigoTest(unittest.TestCase):
         self.assertEqual((vivo, estado), ("verde", "ambar"))
 
     def test_detecta_correo_en_marcha(self):
-        c = servidores_ssh._correo
+        c = lambda *a: servidores_ssh._correo(*a)[0]
         self.assertEqual(c([], ["correo-mailu-nqcdcp-front-1\trunning\tUp 4 hours"], []), "Mailu")
         self.assertEqual(c([], ["mailu-front-1\texited\tExited (0)"], []), "")              # parado no cuenta
         self.assertEqual(c(["mail_smtp\t0/0", "mailcow_x\t1/1"], [], []), "mailcow")
         self.assertEqual(c(["mailu_smtp\t0/0"], [], []), "")
-        self.assertEqual(c([], [], ["postfix"]), "Postfix")
         self.assertEqual(c(["pspro-db\t1/1"], ["app\trunning\tUp"], []), "")
-        # solo como palabra entera: un nombre que la lleva dentro no es un servidor de correo
+        # palabra entera, no trozo de texto
+        self.assertEqual(c([], ["emailupdater\trunning\tUp", "postfixadmin-web\trunning\tUp"], []), "")
         self.assertEqual(c(["emailupdater\t1/1", "maximo\t1/1"], ["postgres\trunning\tUp"], []), "")
         self.assertEqual(c(["mail.mailu_smtp\t1/1"], [], []), "Mailu")
+        self.assertEqual(c([], [], ["exim4"]), "Exim")
+        # cada software trae SUS puertos: Postfix no sirve IMAP
+        self.assertEqual(servidores_ssh._correo([], [], ["postfix"]), ("Postfix", [25, 465, 587]))
+        self.assertEqual(servidores_ssh._correo([], [], ["postfix", "dovecot"]), ("Postfix + Dovecot", [25, 465, 587, 993, 995]))
+        self.assertEqual(servidores_ssh._correo([], ["x-mailu-front-1\trunning\tUp"], [])[1], [25, 465, 587, 993, 995])
         d = servidores_ssh.interpretar(servidores_ssh.secciones("### correo\ndovecot\n"))
-        self.assertEqual(d.get("correo"), "Dovecot")
+        self.assertEqual((d.get("correo"), d.get("correo_puertos")), ("Dovecot", [993, 995]))
+
+    def test_correo_solo_acepta_los_puertos_de_su_software(self):
+        d = {"bastionado": {}, "puertos": [22, 25, 993], "correo": "Postfix", "correo_puertos": [25, 465, 587]}
+        with mock.patch.object(servidores_ciclo, "leer", return_value=(d, "", 0.1)), \
+             mock.patch.object(servidores_ciclo, "puertos_expuestos", return_value=[22, 25, 993]), \
+             mock.patch.object(servidores_ciclo.webs_sondeo, "medidas", return_value=[]):
+            r = servidores_ciclo.recoger_uno({"nombre": "a", "ssh": "infobar@203.0.113.9"}, [])
+            self.assertEqual(r["tarjetas"]["puertos"]["raros"], [993])           # el 993 no lo sirve Postfix: sigue avisando
+            chk = {x["id"]: x for x in r["bastionado"]}["puertos"]
+            self.assertIn("no los sirve", chk["arreglo"])
+            # `correo: false` en Ajustes: nada se acepta
+            r = servidores_ciclo.recoger_uno({"nombre": "a", "ssh": "infobar@203.0.113.9", "correo": False}, [])
+            self.assertEqual(r["tarjetas"]["puertos"]["raros"], [25, 993])
+            # `correo: true` acepta todos los de correo, también con un software detectado que no los sirve (un Dovecot sin reconocer)
+            r = servidores_ciclo.recoger_uno({"nombre": "a", "ssh": "infobar@203.0.113.9", "correo": True}, [])
+            self.assertEqual(r["tarjetas"]["puertos"]["raros"], [])
+            # y aunque no se reconozca ningún software
+            d.pop("correo"); d.pop("correo_puertos")
+            r = servidores_ciclo.recoger_uno({"nombre": "a", "ssh": "infobar@203.0.113.9", "correo": True}, [])
+            self.assertEqual(r["tarjetas"]["puertos"]["raros"], [])
 
     def test_puertos_de_correo(self):
         from infobar.servidores_externo import PUERTOS_CORREO
@@ -152,8 +177,8 @@ class RevisionCodigoTest(unittest.TestCase):
         # los del correo van al texto pequeño: en la cifra grande no caben 7 puertos
         self.assertEqual(_puertas([22, 25, 80, 443, 465, 587, 993], {"correo": "Mailu"}), ("22·80·443", "+ correo (Mailu)"))
         self.assertEqual(_puertas([22, 80, 443, 3000, 8080, 9000], {})[0], "6 abiertas")
+        self.assertEqual(_puertas([25, 465], {"correo": "Mailu"}), ("—", "+ correo (Mailu)"))
         self.assertEqual(_puertas([22, 80, 443, 3000], {"raros": [3000]}), ("22·80·443·3000", "¡3000 expuesto!"))
-        self.assertEqual(_puertas([25, 465], {"correo": "Mailu"}), ("—", "+ correo (Mailu)"))      # solo los del correo: la cifra no queda vacía
 
     def test_correo_en_config(self):
         from infobar.servidores import errores_servidores
@@ -166,6 +191,12 @@ class RevisionCodigoTest(unittest.TestCase):
         self.assertEqual(d["actualizaciones"], {"pendientes": 0, "reinicio": False, "en_espera": 3})
         d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n24\nsin-reinicio\n### espera\ninstalables 21\n"))
         self.assertEqual(d["actualizaciones"], {"pendientes": 21, "reinicio": False, "en_espera": 3})
+        # un parche de seguridad retenido sigue siendo pendiente: «espera» nunca lo esconde
+        d = servidores_ssh.interpretar(servidores_ssh.secciones(
+            "### actualizaciones\n5\nsin-reinicio\n### bastionado\nparches_seguridad 2\n### espera\ninstalables 0\n"))
+        self.assertEqual((d["actualizaciones"]["pendientes"], d["actualizaciones"]["en_espera"]), (2, 3))
+        d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n3\nsin-reinicio\n### espera\ninstalables " + "9" * 5000 + "\n"))
+        self.assertEqual(d["actualizaciones"], {"pendientes": 3, "reinicio": False})          # número absurdo: se ignora
         d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n3\nsin-reinicio\n"))     # script antiguo
         self.assertEqual(d["actualizaciones"], {"pendientes": 3, "reinicio": False})
 

@@ -219,9 +219,9 @@
       tj("persona", "Dentro ahora", v.sesiones ? v.sesiones + (v.sesiones === 1 ? " sesión" : " sesiones") : "Nadie", v.sesiones ? "sesiones SSH abiertas" : "Sin sesiones SSH", est("sesiones")),
       tj("mano", "Intentos 1 h", v.intentos ? String(v.intentos.hora ?? 0) : "—", v.intentos ? (v.intentos.total ?? 0) + " en 24 h" : "el servidor no registra intentos", est("intentos")),
       tj("prohibido", "Bloqueadas", f.instalado ? String(f.ahora ?? 0) : "—", f.instalado ? (f.total ?? 0) + " en total (fail2ban)" : "sin fail2ban", est("bloqueadas")),
-      tj("puerta", "Puertas abiertas", v.expuestos.length ? v.expuestos.join(" · ") : "—", v.raros.length ? "¡" + v.raros.join(", ") + " expuesto!" : "abiertas a Internet", est("puertos")),
+      tj("puerta", "Puertas abiertas", puertas(v), v.raros.length ? "¡" + v.raros.join(", ") + " expuesto!" : (v.correo ? "+ correo (" + v.correo + ")" : "abiertas a Internet"), est("puertos")),
       tj("escudo", "Protección", b.total ? b.hechos + " de " + b.total : "—", b.estado === "verde" ? "todo en su sitio" : "ajustes de seguridad", viejo ? "gris" : b.estado),
-      tj("llave", "Mantenimiento", a.pendientes ? a.pendientes + " paquetes" : "Al día", a.reinicio ? "reinicio pendiente" : "paquetes del sistema", est("mantenimiento")));
+      tj("llave", "Mantenimiento", a.pendientes ? a.pendientes + " paquetes" : "Al día", a.reinicio ? "reinicio pendiente" : (a.en_espera ? a.en_espera + " en espera" : "paquetes del sistema"), est("mantenimiento")));
     const falta = (b.falta || []);
     const lista = h("div", {class: "lista"}, ...(falta.length ? falta.map(c => h("div", {class: "f", style: "display:block"}, h("div", {style: "font-weight:600"}, c.texto || ""), c.arreglo ? h("div", {class: "mono tenue", style: "white-space:normal;overflow-wrap:anywhere;margin-top:2px"}, c.arreglo) : null))
       : [h("div", {class: "f"}, h("div", {class: "n"}, punto("verde"), h("span", {}, "Todo en su sitio")), h("span", {class: "mono tenue"}, (b.hechos || 0) + " de " + (b.total || 0)))]));
@@ -229,12 +229,23 @@
       h("div", {class: "c6 col-f"}, titulo("Qué falta para protegerlo", falta.length ? String(falta.length) : null), lista));
   }
 
+  // la cifra grande: con correo aceptado sus puertos van al texto pequeño, y con más de 4 se cuenta (si no, se sale de la tarjeta)
+  const CORREO = [25, 465, 587, 993, 995];
+  function puertas(v){
+    if (!v.expuestos.length) return "—";
+    const grandes = v.correo ? v.expuestos.filter(p => !CORREO.includes(p)) : v.expuestos;
+    return grandes.length > 4 ? v.expuestos.length + " abiertas" : (grandes.join(" · ") || "—");
+  }
+
   function servicios(d){
-    const ss = ((d.vivo && d.vivo.servicios) || []).slice().sort((a, b) => a.ok - b.ok || String(a.nombre).localeCompare(String(b.nombre)));
+    // primero los caídos, luego los parados a mano (0/0, en gris), luego los que van bien
+    const peso = s => !s.ok ? 0 : (s.parado ? 1 : 2);
+    const ss = ((d.vivo && d.vivo.servicios) || []).slice().sort((a, b) => peso(a) - peso(b) || String(a.nombre).localeCompare(String(b.nombre)));
     if (!ss.length) return null;
-    const caidos = ss.filter(s => !s.ok).length;
-    return h("div", {class: "col-f"}, titulo("Servicios", caidos ? caidos + " caído" + (caidos > 1 ? "s" : "") + " de " + ss.length : ss.length + " en marcha"),
-      h("div", {class: "pils"}, ...ss.map(s => h("span", {class: "pil vidrio", title: s.nombre}, punto(s.ok ? "verde" : "rojo"), h("span", {}, s.nombre)))));
+    const caidos = ss.filter(s => !s.ok).length, parados = ss.filter(s => s.ok && s.parado).length;
+    const resumen = [caidos ? caidos + " caído" + (caidos > 1 ? "s" : "") : "", parados ? parados + " parado" + (parados > 1 ? "s" : "") : ""].filter(Boolean).join(" · ");
+    return h("div", {class: "col-f"}, titulo("Servicios", resumen ? resumen + " de " + ss.length : ss.length + " en marcha"),
+      h("div", {class: "pils"}, ...ss.map(s => h("span", {class: "pil vidrio", title: s.nombre}, punto(!s.ok ? "rojo" : (s.parado ? "gris" : "verde")), h("span", {}, s.nombre)))));
   }
 
   // procesador y memoria de las últimas 24 h (porcentajes máximos por hora, de /servidores/historia)
