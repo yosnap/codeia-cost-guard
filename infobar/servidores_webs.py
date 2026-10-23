@@ -13,6 +13,7 @@ import threading
 import time
 
 from .config_y_estado import log, modificar_servidores
+from .certificados import contexto_ssl
 from .servidores import _DNS_INTERNOS as DNS_INTERNOS, ip_no_publica, url_valida
 
 MAX_HOSTS = 200
@@ -131,7 +132,7 @@ def _sirve_tls(ip, dominio, tope=3.0):
     una CDN o el SSH vaya por una red privada. Solo el saludo TLS: no se pide nada."""
     try:
         with socket.create_connection((str(ip), 443), tope) as s:
-            with ssl.create_default_context().wrap_socket(s, server_hostname=dominio):
+            with contexto_ssl().wrap_socket(s, server_hostname=dominio):
                 return True
     except (OSError, ssl.SSLError, ValueError):
         return False

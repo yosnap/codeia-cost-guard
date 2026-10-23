@@ -26,6 +26,7 @@ import unicodedata
 import urllib.parse
 
 from .servidores import url_valida
+from .certificados import contexto_ssl
 from .servidores_externo import ip_publica
 
 RUTAS = ("/api/settings.health", "/api/settings.getDokployVersion", "/api/overview.services", "/api/overview.domains", "/api/overview.backups")
@@ -63,7 +64,7 @@ class _Conexion(http.client.HTTPSConnection):
     """HTTPS contra una IP ya comprobada, validando el certificado del nombre original."""
 
     def __init__(self, host, ip, puerto, plazo):
-        super().__init__(host, puerto, timeout=plazo, context=ssl.create_default_context())
+        super().__init__(host, puerto, timeout=plazo, context=contexto_ssl())
         self._ip = ip
 
     def connect(self):

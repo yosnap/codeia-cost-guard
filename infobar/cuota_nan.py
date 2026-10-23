@@ -1,7 +1,8 @@
 """Consumo real de la cuenta NaN (GET /v1/usage), con cache en disco."""
-import json, os, ssl, time, urllib.parse, urllib.request
+import json, os, time, urllib.parse, urllib.request
 
 from . import claves, rutas
+from .certificados import contexto_ssl
 from .config_y_estado import cfg, log
 
 
@@ -49,26 +50,6 @@ def clave_nan():
     return ""
 
 
-def _contexto_ssl():
-    """El Python de python.org en macOS no trae el almacen de certificados del sistema.
-
-    Sin esto, /usage falla con CERTIFICATE_VERIFY_FAILED. Se prueba certifi y, si no, el bundle
-    que macOS deja en /etc/ssl/cert.pem. Nunca se desactiva la verificacion.
-    """
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        pass
-    for cafile in ("/etc/ssl/cert.pem", "/usr/local/etc/openssl/cert.pem", "/opt/homebrew/etc/openssl/cert.pem"):
-        if os.path.exists(cafile):
-            try:
-                return ssl.create_default_context(cafile=cafile)
-            except Exception:
-                pass
-    return ssl.create_default_context()
-
-
 def _por_modelo(d):
     """{modelo: tokens} de la respuesta de /usage. Una respuesta sin totals.by_model (un error con
     200, un cambio de formato) NO es "cero consumo": se lanza para no cachearla 5 min como buena."""
@@ -105,7 +86,7 @@ def uso_nan(inicio_mes):
             f"{NAN_USO_URL}?start_date={inicio_mes}",
             headers={"Authorization": f"Bearer {key}", "User-Agent": "CostBar/1.0",
                      "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=6, context=_contexto_ssl()) as resp:
+        with urllib.request.urlopen(req, timeout=6, context=contexto_ssl()) as resp:
             d = json.loads(resp.read().decode("utf-8"))
         por_modelo = _por_modelo(d)
         try:

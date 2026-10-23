@@ -8,6 +8,7 @@ comprobacion y la conexion (rebinding, nip.io) no lleva la peticion a 127.0.0.1 
 import http.client, socket, ssl, subprocess, time, urllib.parse
 
 from . import plataforma
+from .certificados import contexto_ssl
 from .servidores import ip_no_publica, url_valida
 
 TIMEOUT_WEB = 5
@@ -33,7 +34,7 @@ class _HTTPSFijo(http.client.HTTPSConnection):
     """HTTPS contra una IP ya comprobada, validando el certificado del nombre original."""
 
     def __init__(self, host, ip, puerto, timeout):
-        super().__init__(host, puerto, timeout=timeout, context=ssl.create_default_context())
+        super().__init__(host, puerto, timeout=timeout, context=contexto_ssl())
         self._ip = ip
 
     def connect(self):
