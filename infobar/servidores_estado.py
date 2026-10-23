@@ -5,6 +5,8 @@ verde = bien · ambar = mirar · rojo = actuar · gris = sin dato (o dato viejo)
 from .servidores_externo import PUERTOS_CORREO, PUERTOS_PUBLICOS
 
 ORDEN = {"gris": 0, "verde": 1, "ambar": 2, "rojo": 3}
+# una web que tarda más que esto en responder pone la tarjeta de webs en ámbar (y el desplegable la marca y la nombra)
+WEB_LENTA_MS = 1500
 
 
 def peor(*estados):
@@ -38,7 +40,7 @@ def tarjetas(d, webs, expuestos, conocidas=(), permitidos=(), correo=""):
         t["disco"] = {"estado": _umbral(_pct(d["disco"]["usado"], d["disco"]["total"]), 85, 95)}
     if webs:
         malas = [w for w in webs if w["error"] or (w["codigo"] or 0) >= 500]
-        lentas = [w for w in webs if (w["ms"] or 0) > 1500]
+        lentas = [w for w in webs if (w["ms"] or 0) > WEB_LENTA_MS]
         t["webs"] = {"estado": "rojo" if malas else ("ambar" if lentas else "verde")}
         # el certificado va en su propia tarjeta: sus días cambian una vez al día, así que no cuenta para la salud VIVA (la que acelera la recogida)
         dias = [w["cert_dias"] for w in webs if isinstance(w.get("cert_dias"), int) and not isinstance(w.get("cert_dias"), bool)]

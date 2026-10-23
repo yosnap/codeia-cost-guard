@@ -162,6 +162,16 @@ class PaginasTest(unittest.TestCase):
         with mock.patch.object(desplegable_servidores, "leer_ui", return_value={"abiertas": "no es una lista"}):
             self.assertNotIn("plg abierto", desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, False))
 
+    def test_la_web_lenta_se_marca_y_se_nombra_en_el_motivo(self):
+        webs = [{"url": "https://rapida.example/", "codigo": 200, "ms": 300, "error": ""},
+                {"url": "https://lenta.example/", "codigo": 200, "ms": servidores_estado.WEB_LENTA_MS + 700, "error": ""}]
+        t = servidores_estado.tarjetas({}, webs, [])
+        self.assertEqual(t["webs"]["estado"], "ambar")
+        self.assertEqual([desplegable_servidores._clase_web(w) for w in webs], ["verde", "ambar"])
+        texto = desplegable_servidores._motivos(t, {}, {}, webs)[0][1]
+        self.assertIn("lenta.example", texto)
+        self.assertNotIn("rapida.example", texto)
+
     def test_sin_motivos_no_hay_seccion(self):
         t = {k: {"estado": "verde"} for k in ("cpu", "memoria", "disco", "webs", "certificado", "sesiones", "intentos", "bloqueadas", "puertos", "mantenimiento", "servicios")}
         self.assertEqual(desplegable_servidores._motivos(t, {"estado": "verde", "total": 12, "hechos": 12}, {}, []), [])

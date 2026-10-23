@@ -8,6 +8,7 @@ import time
 from .config_y_estado import leer_ui
 from .desplegable_comun import cabecera, esc, icono, pagina, pestanas, pie, tarjeta
 from .servidores_ciclo import estado_visible, intervalos, peor_estado
+from .servidores_estado import WEB_LENTA_MS
 from .servidores_externo import PUERTOS_CORREO
 from .servidores_panel import VENTANA_S as VENTANA_PANEL_S
 
@@ -58,9 +59,18 @@ def _clase_web(w):
     c, ms = w.get("codigo"), w.get("ms")
     if not isinstance(c, int) or isinstance(c, bool) or c >= 500 or w.get("error"):
         return "rojo"
-    if 200 <= c < 400 or c in (401, 403):
-        return "ambar" if isinstance(ms, (int, float)) and ms > 5000 else "verde"
+    if _respuesta_buena(w):
+        return "ambar" if isinstance(ms, (int, float)) and ms > WEB_LENTA_MS else "verde"
     return "ambar"
+
+
+def _dominio(w):
+    return w["url"].split("//")[-1].strip("/")
+
+
+def _respuesta_buena(w):
+    c = w.get("codigo")
+    return isinstance(c, int) and (200 <= c < 400 or c in (401, 403))
 
 
 def _seccion_webs(webs):
@@ -74,7 +84,7 @@ def _seccion_webs(webs):
     for w in filas[:MAX_WEBS]:
         c = _clase_web(w)
         dato = (str(w["codigo"]) if isinstance(w.get("codigo"), int) else "sin respuesta") + (f' · {w["ms"]} ms' if isinstance(w.get("ms"), (int, float)) and w.get("codigo") else "")
-        html.append(f'<div class="f"><span><i class="p {c}"></i> {esc(w["url"].split("//")[-1].strip("/"))}</span><span class="mono">{esc(dato)}</span></div>')
+        html.append(f'<div class="f"><span><i class="p {c}"></i> {esc(_dominio(w))}</span><span class="mono">{esc(dato)}</span></div>')
     nota = f'{len(webs)}' + (f' · {caidas} con error' if caidas else " · todas responden")
     extra = f'<div class="nota" style="padding:4px 0">+{len(webs) - MAX_WEBS} más</div>' if len(webs) > MAX_WEBS else ""
     return f'<div class="sec"><span>Webs</span><span class="nota">{nota}</span></div><div class="lista">{"".join(html)}{extra}</div>'
@@ -98,7 +108,10 @@ def _motivos(t, res, d, webs, panel=None, ahora=None):
     if caidas:
         out.append(("rojo", f"{caidas} web{'s' if caidas > 1 else ''} con error o sin responder"))
     elif mal("webs"):
-        out.append((color("webs"), "Alguna web va lenta o responde con error"))
+        flojas = [w for w in webs if _clase_web(w) == "ambar"]
+        nombres_w = ", ".join(_dominio(w) + (f' ({w["ms"]} ms)' if isinstance(w.get("ms"), (int, float)) and _respuesta_buena(w) else f' ({w.get("codigo")})')
+                              for w in flojas[:3]) + ("…" if len(flojas) > 3 else "")
+        out.append((color("webs"), (f"Va lenta o responde con error: {nombres_w}" if flojas else "Alguna web va lenta o responde con error")))
     nombres = {"cpu": "Procesador al límite", "memoria": "Memoria justa", "disco": "El disco se está llenando", "sesiones": "Sesiones SSH que no reconozco",
                "intentos": "Muchos intentos de acceso",
                "bloqueadas": "Muchas direcciones bloqueadas por fail2ban" if (d.get("fail2ban") or {}).get("instalado") else "fail2ban no está instalado (nadie bloquea a quien insiste)",
