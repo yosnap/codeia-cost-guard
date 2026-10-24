@@ -2,6 +2,7 @@
 las rutas de datos (config.json, state.json, logs) en una carpeta temporal. Importar ANTES que
 costbar: HOME se fija antes de cargarlo porque los lectores lo leen al importarse."""
 import os
+import shutil
 import sys
 import tempfile
 
@@ -32,6 +33,34 @@ from infobar import claves  # noqa: E402
 if not hasattr(claves, "leer_clave_real"):          # una sola vez, aunque el módulo se importe por dos nombres
     claves.leer_clave_real = claves.leer_clave      # para las pruebas del propio almacén
 claves.leer_clave = lambda cuenta: ""
+
+
+BASH = shutil.which("bash") or "bash"
+"""La ruta completa al bash.exe de verdad (Git/MSYS2), resuelta por orden de PATH.
+
+En Windows, `subprocess.run(["bash", ...])` con el nombre pelado NO busca por PATH: CreateProcess
+mira antes el directorio de System32, y ahi vive el *launcher* de WSL (otro `bash.exe`, el de
+Windows) que entiende `/mnt/c/...`, no `/c/...` de MSYS2 - con el nombre pelado, cualquier ruta
+"de verdad" sale como "No such file or directory" aunque exista. Pasando la ruta ya resuelta de
+`shutil.which` (que si respeta el orden de PATH) se evita el launcher de WSL."""
+
+
+def ruta_bash(ruta):
+    """Una ruta de os.path.join, lista para pasarsela a bash/sh (como argv o embebida en un PATH=).
+
+    En Windows hacen falta DOS conversiones que una simple barra no resuelve:
+    - El runtime MSYS2 de Git Bash reparsea el argv recibido de un proceso no-MSYS con reglas de
+      escape estilo POSIX: cada '\\X' se convierte en 'X' (la barra desaparece), asi que una ruta
+      con '\\' le llega troceada.
+    - 'C:\\...' puesta dentro de un PATH=... separado por ':' se corta en la propia 'C:' (la letra
+      de unidad choca con el separador de PATH).
+    La forma POSIX de MSYS2 ('/c/Users/...') no tiene ninguno de los dos problemas: sin barras
+    invertidas y sin ':' de por medio. En POSIX la ruta ya viene asi; no hace falta tocarla."""
+    if os.name != "nt":
+        return ruta
+    unidad, resto = os.path.splitdrive(ruta)
+    resto = resto.replace("\\", "/")
+    return f"/{unidad[0].lower()}{resto}" if unidad else resto
 
 
 def cookie_de(srv):

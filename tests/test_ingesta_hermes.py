@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -90,6 +91,11 @@ class HermesTest(BaseH):
         self.uso(inp=1000, out=100, ultima=PRIMERA + 10)
         self.pasada()
         self.uso(inp=5000, out=400, ultima=PRIMERA + 9000)                           # la misma fila, más consumo
+        # mtime claramente futuro: las dos pasadas pueden caer en el mismo tick del reloj de
+        # ficheros (mas grueso en Windows que el tiempo que tarda este test), y sin esto la firma
+        # de la base no cambia y la segunda pasada se sirve de la cache de la primera.
+        futuro = time.time() + 5
+        os.utime(self.ruta, (futuro, futuro))
         r = self.pasada()
         self.assertEqual((r["nuevos"], r["subidos"]), (0, 1))
         t = next(iter(self.turnos().values()))
@@ -101,6 +107,8 @@ class HermesTest(BaseH):
         self.uso(inp=5000)
         self.pasada()
         self.uso(inp=100)
+        futuro = time.time() + 5          # mismo motivo que en test_los_contadores_acumulados_suben_sin_duplicar
+        os.utime(self.ruta, (futuro, futuro))
         self.pasada()
         self.assertEqual(next(iter(self.turnos().values()))["gi"], 5000)
         self.assertTrue(any(a["tipo"] == "contador_baja" for a in almacen.anomalias(self.con)))

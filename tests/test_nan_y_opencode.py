@@ -110,7 +110,11 @@ class OpenCodeTest(unittest.TestCase):
         con.execute("insert into message values ('m9', 's1', ?, ?)", (int(time.time() * 1000), json.dumps(uso)))
         con.commit()
         con.close()
-        os.utime(self.db, None)
+        # adelanta el mtime 2s a mano: la resolucion del reloj del FS (~15ms en Windows) puede dejar
+        # el mismo tick que el de antes del insert, y el tamano no siempre crece (paginas libres
+        # reutilizadas) -> con "ahora" la firma de cache podria no cambiar y el test seria inestable
+        nuevo = os.path.getmtime(self.db) + 2
+        os.utime(self.db, (nuevo, nuevo))
         proyectos, _ = lectores_logs.leer_bases()
         self.assertEqual(self._total(proyectos), 2 * (100 + 20 + 50 + 5) + 2)
 

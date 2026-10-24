@@ -83,7 +83,7 @@ def ejecutar(servidor):
     except ValueError as e:
         return "", str(e)
     try:
-        p = subprocess.Popen(orden, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        p = subprocess.Popen(plataforma.resuelve_programa(orden), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, **plataforma.grupo_nuevo_kwargs())
     except OSError as e:
         return "", f"no se pudo lanzar ssh: {e}"

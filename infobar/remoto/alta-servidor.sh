@@ -68,11 +68,15 @@ fi
 
 # --- registro en la app: el mismo codigo que usa Ajustes, con el Python de la instalación
 PY="$HOME/.cost-guard/venv/bin/python"
+[ -x "$PY" ] || PY="$HOME/.cost-guard/venv/Scripts/python.exe"      # instalar_windows.py crea el venv asi, no en venv/bin
 [ -x "$PY" ] || PY="$(command -v python3 || true)"
 registro() {   # registrar [--comprobar|--probar] nombre host puerto -> 0 hecho/se puede, 4 ya estaba, 2 nombre no válido,
                # 3 nombre de otro servidor, 5 la app no lo lee como infobar, 6 host o puerto no válidos
   [ -n "$PY" ] || return 127
-  (cd "$APP" && PYTHONPATH="$APP" "$PY" -m infobar.servidores_alta registrar "$@" >/dev/null 2>&1)
+  # sin PYTHONPATH="$APP": "python -m" ya añade el directorio actual al sys.path solo con el cd de
+  # abajo: forzarlo hacia a mano rompia si $PY es un python nativo de Windows (no MSYS2) y $APP viene
+  # en forma POSIX (/c/Users/...) - ese formato no es una ruta valida para el import de un python nativo
+  (cd "$APP" && "$PY" -m infobar.servidores_alta registrar "$@" >/dev/null 2>&1)
 }
 linea_registro() { printf 'cd %q && %q -m infobar.servidores_alta registrar %q %q %q\n' "$APP" "${PY:-python3}" "$1" "$HOST" "$PUERTO"; }
 SIN_REGISTRO=0
@@ -117,7 +121,9 @@ CREAR_CLAVE="Crea tu clave personal en el Mac con: ssh-keygen -t ed25519   (Intr
 if [ ! -f "$CLAVE" ]; then
   echo "-> creando la clave dedicada $CLAVE"
   mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-  ssh-keygen -q -t ed25519 -N "" -C "infobar@$(hostname -s)" -f "$CLAVE"
+  # hostname -s (forma corta) es de BSD/macOS; el hostname de GNU/MSYS2 no tiene opciones. El "cut"
+  # da el mismo resultado en los tres sistemas (no hace nada si no hay dominio que recortar).
+  ssh-keygen -q -t ed25519 -N "" -C "infobar@$(hostname | cut -d. -f1)" -f "$CLAVE"
 fi
 PUB="$(cat "$CLAVE.pub")"
 [[ "$PUB" =~ ^ssh-ed25519\ [A-Za-z0-9+/=]{60,80}(\ [A-Za-z0-9@._-]{1,60})?$ ]] || {

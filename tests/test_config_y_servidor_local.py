@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aislamiento  # noqa: E402,F401  (HOME y rutas temporales: antes que costbar)
@@ -171,6 +172,23 @@ class ServidorLocalTest(LimpiaConfig):
     def test_host_ajeno_rechazado(self):
         self.assertEqual(self._pide("GET", "/config.json", cabeceras={"Host": "evil.com"})[0], 403)
         self.assertEqual(self._pide("GET", "/", cabeceras={"Host": f"evil.com:{self.puerto}"})[0], 403)
+
+    def test_navegador_abre_con_un_ticket_propio(self):
+        # el navegador del sistema no comparte cookies con la ventana nativa: /navegador le da
+        # un ticket nuevo de un solo uso en vez de depender de la sesion de quien hizo la peticion
+        with mock.patch.object(servidor_local.webbrowser, "open") as abre:
+            codigo, cuerpo = self._pide("GET", "/navegador")
+        self.assertEqual(codigo, 200)
+        self.assertEqual(json.loads(cuerpo), {"ok": True})
+        abre.assert_called_once()
+        (url,), _ = abre.call_args
+        self.assertRegex(url, rf"^http://127\.0\.0\.1:{self.puerto}/entrar\?t=[\w-]+$")
+
+    def test_navegador_sin_sesion_rechazado(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=30)
+        c.request("GET", "/navegador", headers={"Host": f"127.0.0.1:{self.puerto}"})      # sin cookie
+        r = c.getresponse()
+        self.assertEqual(r.status, 401)
 
     def test_get_sin_secretos_y_con_cuotas(self):
         estado, cuerpo = self._pide("GET", "/config.json")

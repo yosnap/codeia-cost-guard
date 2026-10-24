@@ -13,6 +13,9 @@ import tempfile
 import time
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aislamiento  # noqa: E402,F401
+
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTO = os.path.join(RAIZ, "infobar", "remoto")
 
@@ -86,20 +89,48 @@ class AltaServidorSh(unittest.TestCase):
         self.bin = os.path.join(self.dir, "bin")
         os.mkdir(self.bin)
         for nombre, fuente in (("ssh", FAKE_SSH % {"py": sys.executable}), ("scp", FAKE_SCP % {"py": sys.executable}),
-                               ("python3", f'#!/bin/sh\nexec {sys.executable} "$@"\n')):
+                               # sys.executable va DENTRO del cuerpo del script (no en el shebang):
+                               # /bin/sh se come cada "\" de una ruta de Windows al interpretar texto
+                               # normal (a diferencia del shebang, que no pasa por ese reparseo)
+                               ("python3", f'#!/bin/sh\nexec {aislamiento.ruta_bash(sys.executable)} "$@"\n')):
             ruta = os.path.join(self.bin, nombre)
             with open(ruta, "w") as f:
                 f.write(fuente)
             os.chmod(ruta, 0o755)
+        # "ssh" pelado (sin extensión) lo resuelve bash solo (interpreta el shebang él mismo), pero
+        # infobar/plataforma.py::resuelve_programa() en Windows nunca lo encuentra así (solo .exe/.com
+        # o un sidecar .py vía COSTGUARD_FAKES_DIR): el "$PY -m infobar..." que lanza el propio script
+        # para --probar necesita este sidecar para dar con el ssh de pega.
+        if os.name == "nt":
+            with open(os.path.join(self.bin, "ssh.py"), "w") as f:
+                f.write(FAKE_SSH % {"py": sys.executable})
         self.log = os.path.join(self.dir, "llamadas.jsonl")
         self.autorizada = os.path.join(self.dir, "autorizada.txt")
 
     def entorno(self, **extra):
-        return {"PATH": self.bin + os.pathsep + "/usr/bin:/bin", "HOME": self.home, "FAKE_LOG": self.log, "FAKE_AUTORIZADA": self.autorizada,
-                "LANG": "es_ES.UTF-8", **extra}
+        env = {"PATH": self.bin + os.pathsep + os.environ.get("PATH", ""), "HOME": self.home, "FAKE_LOG": self.log,
+               "FAKE_AUTORIZADA": self.autorizada, "LANG": "es_ES.UTF-8", "COSTGUARD_FAKES_DIR": self.bin, **extra}
+        if os.name == "nt":
+            # ntpath.expanduser() (lo que usa servidores_ssh.CLAVE="~/.ssh/infobar_ed25519") nunca mira
+            # HOME en Windows, solo USERPROFILE (o HOMEDRIVE+HOMEPATH); en una sesión real de Windows
+            # esa variable siempre la pone el propio sistema - aquí hay que simularla a mano porque el
+            # entorno del proceso nativo anidado ("$PY" -m infobar... dentro del propio script) es
+            # justo el que se construye aquí, no el real del sistema.
+            env.setdefault("USERPROFILE", self.home)
+        return env
 
     def corre(self, *args, script=None, **extra):
-        r = subprocess.run(["bash", script or self.script, *args], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL, env=self.entorno(**extra))
+        # "bash" pelado en Windows cae en el *launcher* de WSL de System32 (ver aislamiento.BASH); el
+        # script y el PATH de los fakes van en forma POSIX de MSYS2 (argv/env reparseados si no)
+        env = self.entorno(**extra)
+        env["PATH"] = aislamiento.ruta_bash(self.bin) + os.pathsep + env["PATH"]
+        env["HOME"] = aislamiento.ruta_bash(self.home)
+        # encoding="utf-8" explicito: subprocess.run(text=True) sin el decodifica con el codepage ANSI
+        # del sistema en Windows, no UTF-8 - el script SI emite UTF-8 de verdad (tiene «»/ñ literales).
+        # errors="replace": un subproceso anidado (p.ej. el "$PY -m infobar..." que lanza el propio
+        # script) puede imprimir el suyo con el codepage del sistema, no UTF-8 - no debe romper el test
+        r = subprocess.run([aislamiento.BASH, aislamiento.ruta_bash(script or self.script), *args], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60, stdin=subprocess.DEVNULL, env=env)
         return r.returncode, r.stdout + r.stderr
 
     def llamadas(self, prog=None):
@@ -126,7 +157,7 @@ class SintaxisTest(unittest.TestCase):
     def test_bash_n_de_todos_los_scripts(self):
         for n in sorted(os.listdir(REMOTO)):
             if n.endswith(".sh"):
-                r = subprocess.run(["bash", "-n", os.path.join(REMOTO, n)], capture_output=True, text=True, timeout=30)
+                r = subprocess.run([aislamiento.BASH, "-n", aislamiento.ruta_bash(os.path.join(REMOTO, n))], capture_output=True, text=True, timeout=30)
                 self.assertEqual(r.returncode, 0, n + ": " + r.stderr)
 
 
@@ -140,7 +171,14 @@ class FlujoTest(AltaServidorSh):
         self.assertEqual(len(maestras), 1)                                             # la contraseña se pide como mucho una vez
         m = maestras[0]
         ctl = m[m.index("-o", m.index("-M")) + 1].split("=", 1)[1]
-        self.assertTrue(ctl.startswith("/tmp/cg-alta."))
+        if os.name == "nt":
+            # MSYS2 traduce cualquier argumento que empiece por "/" a su forma nativa de Windows al
+            # lanzar un ejecutable nativo (nuestro ssh de pega es python.exe por detrás; pasaría igual
+            # con el ssh.exe real de Windows): el socket que mktemp creó bajo /tmp llega aquí ya como
+            # ruta nativa con barras "/", no con el prefijo POSIX original.
+            self.assertRegex(ctl, r"[\\/]cg-alta\.")
+        else:
+            self.assertTrue(ctl.startswith("/tmp/cg-alta."))
         self.assertIn("ControlPersist=30m", m)                                     # la cierra el «-O exit» del final; si el script muere de golpe, caduca sola
         admin = [c["args"] for c in ssh if "-M" not in c["args"] and "-O" not in c["args"] and c["args"][c["args"].index("--") + 1] == "root@srv.example.com"]
         self.assertGreaterEqual(len(admin), 3)                                         # permisos, carpeta, instalación
@@ -198,7 +236,10 @@ class FlujoTest(AltaServidorSh):
         self.assertEqual(len(prueba), 1)
         for opcion in ("BatchMode=yes", "StrictHostKeyChecking=yes", "ProxyCommand=none", "IdentitiesOnly=yes", "ControlPath=none"):
             self.assertIn(opcion, prueba[0])
-        self.assertEqual(prueba[0][prueba[0].index("-i") + 1], os.path.join(self.home, ".ssh", "infobar_ed25519"))
+        # ntpath.expanduser() concatena HOME (con "\") y el resto de la ruta original ("/.ssh/...")
+        # tal cual, sin normalizar separador: en Windows da una ruta valida pero con barras mixtas.
+        self.assertEqual(os.path.normpath(prueba[0][prueba[0].index("-i") + 1]),
+                          os.path.normpath(os.path.join(self.home, ".ssh", "infobar_ed25519")))
 
     def test_sin_python_la_prueba_ignora_el_ssh_config_y_la_ficha_es_json_valido(self):
         venv = os.path.join(self.home, ".cost-guard", "venv", "bin")
@@ -209,7 +250,10 @@ class FlujoTest(AltaServidorSh):
         rc, out = self.corre("--nombre", 'web "1" \\ x', "root@srv.example.com", "2222")
         self.assertEqual(rc, 1)
         prueba = [c["args"] for c in self.llamadas("ssh") if c["args"][-1] == "infobar@srv.example.com"][0]
-        self.assertEqual(prueba[prueba.index("-F") + 1], "/dev/null")
+        # MSYS2 traduce "/dev/null" a "nul" solo (sin ruta) al pasarlo como argumento a un programa
+        # nativo de Windows (nuestro ssh de pega vía sys.executable): comportamiento correcto ahi, no
+        # un bug - es justo lo que necesitaria un ssh.exe nativo de verdad para "sin fichero de config"
+        self.assertEqual(prueba[prueba.index("-F") + 1], "nul" if os.name == "nt" else "/dev/null")
         self.assertIn("StrictHostKeyChecking=yes", prueba)
         ficha = out[out.index("servidores.json:") + len("servidores.json:"):].strip().splitlines()[0]
         self.assertEqual(json.loads(ficha), {"nombre": 'web "1" \\ x', "ssh": "infobar@srv.example.com", "puerto": 2222})
@@ -341,6 +385,9 @@ class ClaveElegidaTest(AltaServidorSh):
         self.assertEqual(self.llamadas(), [])
 
 
+@unittest.skipIf(os.name == "nt", "con_terminal() necesita un pty de verdad (pty.fork/os.execve); ninguno de "
+                  "los dos existe en Windows (ni pty ni fork/exec estan en os en esa plataforma) - probarlo "
+                  "ahi necesitaria una dependencia nueva (pywinpty), fuera de alcance aqui")
 class AutorizarClaveTest(AltaServidorSh):
     """La pregunta solo sale en un terminal: se ejecuta con un pty de verdad y se contesta."""
 

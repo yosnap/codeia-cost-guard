@@ -24,18 +24,29 @@ class ErrorRestauracion(Exception):
     """No se restauró nada (o se explica qué quedó). El mensaje es apto para el usuario."""
 
 
-def _borra_wal(destino, tras_reemplazar=False):
+def _borra_wal(destino, tras_reemplazar=False, espera_s=2.0):
+    """En Windows no se puede borrar un -wal/-shm mientras CUALQUIER conexión SQLite lo tiene abierto
+    (en POSIX el unlink no lo necesita libre). Reintenta un rato corto para los lectores transitorios
+    (otra instancia leyendo un instante); si el bloqueo persiste, aborta igual sin tocar nada."""
     for sufijo in ("-wal", "-shm"):
         ruta = destino + sufijo
-        if os.path.exists(ruta):
+        if not os.path.exists(ruta):
+            continue
+        limite = time.monotonic() + espera_s
+        while True:
             try:
                 os.remove(ruta)
+                break
+            except FileNotFoundError:
+                break           # otra conexión lo acaba de limpiar sola al cerrar (checkpoint final): ya no está, que es lo que queríamos
             except OSError as e:
-                if tras_reemplazar:
-                    raise ErrorRestauracion(f"la base YA se restauró, pero no se pudo borrar {os.path.basename(ruta)} ({type(e).__name__}): "
-                                            "bórralo a mano antes de abrir la barra") from None
-                raise ErrorRestauracion(f"no se puede borrar {os.path.basename(ruta)} ({type(e).__name__}): cierra lo que use la base y "
-                                        "reintenta; no se ha cambiado nada") from None
+                if time.monotonic() >= limite:
+                    if tras_reemplazar:
+                        raise ErrorRestauracion(f"la base YA se restauró, pero no se pudo borrar {os.path.basename(ruta)} ({type(e).__name__}): "
+                                                "bórralo a mano antes de abrir la barra") from None
+                    raise ErrorRestauracion(f"no se puede borrar {os.path.basename(ruta)} ({type(e).__name__}): cierra lo que use la base y "
+                                            "reintenta; no se ha cambiado nada") from None
+                time.sleep(0.1)
     return not any(os.path.exists(destino + s) for s in ("-wal", "-shm"))
 
 

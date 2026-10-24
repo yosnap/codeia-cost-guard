@@ -21,6 +21,7 @@ let periodoModelo = PREF.periodoModelo || periodo, periodoProyecto = PREF.period
 if(plan !== "todos" && !Object.prototype.hasOwnProperty.call(D.proveedores || {}, plan)) plan = "todos";     // un plan renombrado o quitado
 if(!["hoy", "semana", "mes"].includes(periodo)) periodo = "semana";
 let seleccion = null;               // {desde, hasta}: índices dentro de `dias`
+let _navegadorEnCurso = false;      // cooldown de "Ver en el navegador": ver ACCIONES.abrirNavegador
 let conMayus = false;               // un clic con mayúsculas amplía la selección a un tramo
 
 function fmt(n){ n = Number(n) || 0;
@@ -54,7 +55,16 @@ const ACCIONES = {
   setPeriodoProyecto: v => { periodoProyecto = v; pintarProyectos(); },
   vista: v => { window.vista(v); pintarCab(v); },
   refrescar: () => { const v = location.hash.slice(1); if(v) window.vista(v); else location.reload(); },
-  cambiarTema: () => cambiarTema()};
+  cambiarTema: () => cambiarTema(),
+  // el navegador externo no comparte cookies con esta ventana: el servidor abre el suyo propio con
+  // un ticket nuevo (el mismo mecanismo que usa el icono de la bandeja), no window.open() de esta URL.
+  // Cooldown corto: un doble clic o un clic repetido no debe abrir un navegador por cada pulsacion.
+  abrirNavegador: () => {
+    if (_navegadorEnCurso) return;
+    _navegadorEnCurso = true;
+    setTimeout(() => { _navegadorEnCurso = false; }, 2000);
+    fetch("/navegador").catch(() => {});
+  }};
 document.addEventListener("pointerdown", e => { conMayus = e.shiftKey; });
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-a]");

@@ -213,6 +213,9 @@ class PlantillaConDockerRealTest(unittest.TestCase):
             self.assertNotIn(prohibido, self.plantilla())
 
 
+@unittest.skipIf(os.name == "nt", "ejecuta recoger-root.sh de verdad con bash, con symlinks a "
+                 "timeout/tac (os.symlink necesita Modo Desarrollador o admin en Windows); el "
+                 "script es para servidores remotos Linux, no para el cliente")
 class ScriptRootInventarioTest(unittest.TestCase):
     """recoger-root.sh de verdad con un `docker` falso: ids, orden por antigüedad, tope de 200, truncado y fuente."""
 
@@ -222,10 +225,12 @@ class ScriptRootInventarioTest(unittest.TestCase):
         with open(ROOT) as f:
             texto = f.read()
         self.assertIn("export LC_ALL=C PATH=", texto)
-        # PATH cerrado: solo los programas falsos, timeout y tac (por enlace) y lo básico del sistema; así un docker real del Mac no se cuela
+        # PATH cerrado: solo los programas falsos, timeout y tac (por copia) y lo básico del sistema; así un docker real del Mac no se cuela.
+        # Copia en vez de enlace: en Windows, os.symlink pide un privilegio que no siempre hay (modo
+        # desarrollador o admin); para "poner un binario resoluble en el PATH" una copia vale igual.
         for programa in ("timeout", "tac"):
-            os.symlink(shutil.which(programa), os.path.join(self.dir, programa))
-        texto = re.sub(r"export LC_ALL=C PATH=\S+", f"export LC_ALL=C PATH={self.dir}:/usr/bin:/bin", texto, count=1)
+            shutil.copy2(shutil.which(programa), os.path.join(self.dir, programa))
+        texto = re.sub(r"export LC_ALL=C PATH=\S+", f"export LC_ALL=C PATH={aislamiento.ruta_bash(self.dir)}:/usr/bin:/bin", texto, count=1)
         self.script = os.path.join(self.dir, "root.sh")
         with open(self.script, "w") as f:
             f.write(texto)
@@ -246,7 +251,7 @@ class ScriptRootInventarioTest(unittest.TestCase):
         os.chmod(ruta, 0o755)
 
     def ejecuta(self):
-        r = subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        r = subprocess.run([aislamiento.BASH, aislamiento.ruta_bash(self.script)], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         self.crudo = r.stdout
         return ss.analizar("### version\n2\n" + r.stdout + "### fin\n")
 

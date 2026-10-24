@@ -73,6 +73,9 @@ class ParseoTest(unittest.TestCase):
         self.assertEqual(r["descartados"], 50)
 
 
+@unittest.skipIf(os.name == "nt", "ejecuta recoger-root.sh de verdad con bash, con symlinks a "
+                 "timeout/tac (os.symlink necesita Modo Desarrollador o admin en Windows); el "
+                 "script es para servidores remotos Linux, no para el cliente")
 class ScriptRootWebsTest(unittest.TestCase):
     """La sección `webs` de recoger-root.sh de verdad, con un `docker` falso y ficheros de proxy de prueba."""
 
@@ -81,14 +84,17 @@ class ScriptRootWebsTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
         self.proxy = os.path.join(self.dir, "proxy")
         os.mkdir(self.proxy)
+        # Copia en vez de enlace: en Windows, os.symlink pide un privilegio que no siempre hay; para
+        # "poner un binario resoluble en el PATH" una copia vale igual.
         for programa in ("timeout", "tac"):
             if shutil.which(programa):
-                os.symlink(shutil.which(programa), os.path.join(self.dir, programa))
+                shutil.copy2(shutil.which(programa), os.path.join(self.dir, programa))
         with open(ROOT) as f:
             texto = f.read()
-        texto = re.sub(r"export LC_ALL=C PATH=\S+", f"export LC_ALL=C PATH={self.dir}:/usr/bin:/bin", texto, count=1)
+        texto = re.sub(r"export LC_ALL=C PATH=\S+", f"export LC_ALL=C PATH={aislamiento.ruta_bash(self.dir)}:/usr/bin:/bin", texto, count=1)
         self.assertIn('DIRS_PROXY="/etc/dokploy/traefik/dynamic /etc/easypanel/traefik/config /data/coolify/proxy/dynamic"', texto)
-        texto = texto.replace('DIRS_PROXY="/etc/dokploy/traefik/dynamic /etc/easypanel/traefik/config /data/coolify/proxy/dynamic"', f'DIRS_PROXY="{self.proxy}"')
+        texto = texto.replace('DIRS_PROXY="/etc/dokploy/traefik/dynamic /etc/easypanel/traefik/config /data/coolify/proxy/dynamic"',
+                               f'DIRS_PROXY="{aislamiento.ruta_bash(self.proxy)}"')
         self.script = os.path.join(self.dir, "root.sh")
         with open(self.script, "w") as f:
             f.write(texto)
@@ -111,7 +117,7 @@ class ScriptRootWebsTest(unittest.TestCase):
             f.write(texto)
 
     def ejecuta(self):
-        r = subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        r = subprocess.run([aislamiento.BASH, aislamiento.ruta_bash(self.script)], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         self.crudo = r.stdout
         sec, marcadas, invalidas, _ = ss.analizar("### version\n2\n" + r.stdout + "### fin\n")
         return sec, marcadas, invalidas
@@ -137,6 +143,7 @@ class ScriptRootWebsTest(unittest.TestCase):
         self.docker([{"x": "Host(`sin-cerrar.example.com\", \"y\": \"`otro.example.com`", "z": "Host(`ok.example.com`)"}], [])
         self.assertEqual(self.hosts()["hosts"], ["ok.example.com"])
 
+    @unittest.skipIf(os.name == "nt", "os.mkfifo no existe en Windows, y el symlink pide un privilegio que no siempre hay")
     def test_solo_ficheros_normales_del_directorio_no_enlaces_ni_subdirectorios(self):
         fuera = os.path.join(self.dir, "fuera.yml")
         with open(fuera, "w") as f:

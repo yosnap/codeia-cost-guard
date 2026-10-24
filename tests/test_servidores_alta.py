@@ -4,6 +4,7 @@ import http.client
 import io
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -115,15 +116,27 @@ class Base(LimpiaConfig):
         py = sys.executable
         for nombre, fuente in (("ssh", FAKE_SSH % {"py": py, "sec": SECRETO}), ("ssh-keygen", FAKE_KEYGEN % {"py": py, "huella": HUELLA, "pub": PUB}),
                                ("ssh-keyscan", FAKE_KEYSCAN % {"py": py, "b64": CLAVE_B64})):
-            ruta = os.path.join(self.bin, nombre)
-            with open(ruta, "w") as f:
-                f.write(fuente)
-            os.chmod(ruta, 0o755)
+            if os.name == "nt":
+                # en Windows, lanzar un nombre pelado (p.ej. "ssh") solo encuentra un .exe (nunca un
+                # fichero sin extension con shebang, aunque este antes en el PATH): la logica va en un
+                # .py de verdad (el shebang de la primera linea es un comentario inofensivo para
+                # python); plataforma.resuelve_programa() lo encuentra via COSTGUARD_FAKES_DIR (mas
+                # abajo) y lo lanza con el interprete actual, sin pasar por un .cmd/cmd.exe (que
+                # reparsearia mal un comando remoto con caracteres especiales dentro, p.ej. el
+                # diagnostico que ssh manda al servidor)
+                with open(os.path.join(self.bin, nombre + ".py"), "w") as f:
+                    f.write(fuente)
+            else:
+                ruta = os.path.join(self.bin, nombre)
+                with open(ruta, "w") as f:
+                    f.write(fuente)
+                os.chmod(ruta, 0o755)
         self.cfg_ruta, self.log_ruta, self.tar_ruta = (os.path.join(self.dir, n) for n in ("cfg.json", "calls.jsonl", "paquete.tar"))
         self.conocidas = os.path.join(self.dir, "known_hosts")
         self.clave = os.path.join(self.dir, "infobar_ed25519")
         self.fake({})
-        for p in (mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_CFG": self.cfg_ruta, "FAKE_LOG": self.log_ruta, "FAKE_TAR": self.tar_ruta}),
+        for p in (mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + os.environ["PATH"], "COSTGUARD_FAKES_DIR": self.bin,
+                                               "FAKE_CFG": self.cfg_ruta, "FAKE_LOG": self.log_ruta, "FAKE_TAR": self.tar_ruta}),
                   mock.patch.object(alta, "CONOCIDAS", self.conocidas), mock.patch.object(servidores_ssh, "CLAVE", self.clave)):
             p.start()
             self.addCleanup(p.stop)
@@ -189,7 +202,8 @@ class DiagnosticoTest(Base):
         self.assertEqual(r["estado"], "listo")
         with open(self.conocidas) as f:
             self.assertEqual(f.read(), f"srv.example.com ssh-ed25519 {CLAVE_B64}\n")
-        self.assertEqual(oct(os.stat(self.conocidas).st_mode & 0o777), "0o600")
+        if os.name != "nt":                # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(oct(os.stat(self.conocidas).st_mode & 0o777), "0o600")
 
     def test_puerto_distinto_usa_el_formato_corchetes(self):
         id_ = self.diagnostica(puerto=2222)
@@ -268,7 +282,7 @@ class DiagnosticoTest(Base):
         self.fake({"conocida": True, "diag": "ninguno"})
         r = self.espera(self.diagnostica(ssh="admin@srv.example.com", puerto=2222))
         # con --nombre el script da de alta con el mismo nombre que la página: «Comprobar conexión» después no lo duplica
-        self.assertEqual(r["linea_terminal"], f"bash {os.path.join(alta.REMOTO, 'alta-servidor.sh')} --nombre nuevo admin@srv.example.com 2222")
+        self.assertEqual(r["linea_terminal"], f"bash {shlex.quote(os.path.join(alta.REMOTO, 'alta-servidor.sh'))} --nombre {shlex.quote('nuevo')} admin@srv.example.com 2222")
         self.fake({"conocida": True, "diag": "ninguno"})
         alta._ALTAS.clear()
         r = self.espera(self.diagnostica())
@@ -323,10 +337,14 @@ class EntradasHostilesTest(Base):
             self.assertEqual((codigo, r["codigo"]), (400, "entrada_invalida"), m)
         self.assertEqual(self.llamadas(), [])
 
-    def test_ids_y_pasos_incorrectos(self):
+    def test_ids_desconocidos_no_tocan_nada(self):
+        # sin skipIf: alta.atiende() con un id desconocido es un simple lookup en el dict _ALTAS
+        # (ver _busca() en infobar/servidores_alta.py), no toca ssh/subprocess/filesystem
         for accion in ("huella", "instalar", "comprobar", "estado"):
             for cuerpo in ({"id": "no-existe"}, {}, {"id": 5}, None, "x"):
                 self.assertEqual(alta.atiende(accion, cuerpo)[1]["codigo"], "desconocida", (accion, cuerpo))
+
+    def test_pasos_incorrectos_segun_el_estado_del_alta(self):
         id_ = self.diagnostica()
         self.espera(id_)                                                                  # estado «huella»
         self.assertEqual(alta.atiende("instalar", {"id": id_})[1]["codigo"], "estado_incorrecto")
@@ -412,7 +430,8 @@ class InstalacionTest(Base):
         id_, r = self.instala()
         gen = [c for c in self.llamadas() if c["prog"] == "ssh-keygen" and "-t" in c["args"]][0]["args"]
         self.assertEqual((gen[gen.index("-t") + 1], gen[gen.index("-N") + 1], gen[gen.index("-C") + 1]), ("ed25519", "", "infobar"))
-        self.assertEqual(oct(os.stat(self.clave).st_mode & 0o777), "0o600")
+        if os.name != "nt":                # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(oct(os.stat(self.clave).st_mode & 0o777), "0o600")
         self.assertEqual(r["estado"], "hecho")
 
     def test_una_clave_publica_rara_no_se_usa(self):
@@ -428,6 +447,11 @@ class InstalacionTest(Base):
             r = self.espera(id_, ("hecho", "error"))
             self.assertEqual((r["estado"], r["codigo"]), ("error", "sin_clave"), publica)
         self.assertFalse(any("instalar-en-servidor.sh" in " ".join(c["args"]) for c in self.llamadas() if c["prog"] == "ssh"))
+
+    def test_una_clave_con_intento_de_inyeccion_no_genera_comando(self):
+        # sin skipIf: comando_instalacion() solo valida con regex en Python puro, no toca ssh/ssh-keygen
+        # ni el sistema de ficheros, asi que esta comprobacion (que la clave no cuela en el comando remoto)
+        # corre igual en Windows que en POSIX
         with self.assertRaises(alta.AltaError):
             alta.comando_instalacion("ssh-ed25519 x'; id #", True)
 
@@ -508,12 +532,19 @@ class ComandoRemotoTest(Base):
                     '"modos": sorted(oct(os.stat(os.path.join(d, n)).st_mode & 0o777) for n in os.listdir(d)), "clave": sys.argv[2], "argc": len(sys.argv)}\n'
                     f'open({registro!r}, "a").write(json.dumps(info) + "\\n")\n')
         with open(os.path.join(shims, "sudo"), "w") as f:
-            f.write('#!/bin/sh\n[ "$1" = "-n" ] && shift\necho sudo >> ' + os.path.join(self.dir, "sudo.log") + '\nexec "$@"\n')
+            # la ruta va DENTRO del texto del script (no como argv): sin ruta_bash, cada "\" de una
+            # ruta de Windows se come el caracter siguiente al interpretarla /bin/sh como escape
+            f.write('#!/bin/sh\n[ "$1" = "-n" ] && shift\necho sudo >> ' + aislamiento.ruta_bash(os.path.join(self.dir, "sudo.log")) + '\nexec "$@"\n')
         for n in ("bash", "sudo"):
             os.chmod(os.path.join(shims, n), 0o755)
         cmd = alta.comando_instalacion(PUB, como_root)
-        r = subprocess.run(["sh", "-c", cmd], input=alta._paquete(), capture_output=True, timeout=30,
-                           env={"PATH": shims + os.pathsep + "/usr/bin:/bin:/usr/local/bin", "HOME": self.dir})
+        # "sh" pelado en Windows cae en el *launcher* de WSL de System32 (ver aislamiento.BASH); el
+        # PATH se extiende sobre el real (nunca se sustituye por uno sintetico: /usr/bin no existe
+        # tal cual en Windows), con los shims resueltos a forma POSIX de MSYS2
+        env = dict(os.environ)
+        env["PATH"] = aislamiento.ruta_bash(shims) + os.pathsep + env["PATH"]
+        env["HOME"] = aislamiento.ruta_bash(self.dir)
+        r = subprocess.run([aislamiento.BASH, "-c", cmd], input=alta._paquete(), capture_output=True, timeout=30, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         with open(registro) as f:
             return [json.loads(l) for l in f], _re
@@ -523,9 +554,10 @@ class ComandoRemotoTest(Base):
         b, _ = self.corre(True)
         for visto in (a[-1], b[-1]):
             self.assertRegex(visto["dir"], r"/infobar-alta\.[A-Za-z0-9]{6}$")
-            self.assertEqual(visto["modo"], "0o700")                                  # otro usuario del servidor no puede plantar nada ahí
             self.assertEqual(visto["scripts"], sorted(alta.SCRIPTS))
-            self.assertEqual(set(visto["modos"]), {"0o755"})
+            if os.name != "nt":             # NTFS no tiene bits de permiso POSIX (visto["modo"]/["modos"] vienen de mkdir/tar en el "servidor")
+                self.assertEqual(visto["modo"], "0o700")                              # otro usuario del servidor no puede plantar nada ahí
+                self.assertEqual(set(visto["modos"]), {"0o755"})
             self.assertEqual((visto["clave"], visto["argc"]), (PUB, 3))               # la clave llega como UN solo argumento
             self.assertFalse(os.path.exists(visto["dir"]))                            # y el trap lo borra
         self.assertNotEqual(a[-1]["dir"], b[-1]["dir"])                               # nunca una ruta fija
@@ -539,9 +571,11 @@ class ComandoRemotoTest(Base):
         # un instalador que falla: el directorio se borra igual
         shims = os.path.join(self.dir, "shims")
         with open(os.path.join(shims, "bash"), "w") as f:
-            f.write("#!/bin/sh\necho $(dirname $1) > " + os.path.join(self.dir, "ultimo.txt") + "\nexit 7\n")
-        r = subprocess.run(["sh", "-c", alta.comando_instalacion(PUB, True)], input=alta._paquete(), capture_output=True, timeout=30,
-                           env={"PATH": shims + os.pathsep + "/usr/bin:/bin", "HOME": self.dir})
+            f.write("#!/bin/sh\necho $(dirname $1) > " + aislamiento.ruta_bash(os.path.join(self.dir, "ultimo.txt")) + "\nexit 7\n")
+        env = dict(os.environ)
+        env["PATH"] = aislamiento.ruta_bash(shims) + os.pathsep + env["PATH"]
+        env["HOME"] = aislamiento.ruta_bash(self.dir)
+        r = subprocess.run([aislamiento.BASH, "-c", alta.comando_instalacion(PUB, True)], input=alta._paquete(), capture_output=True, timeout=30, env=env)
         self.assertEqual(r.returncode, 7)
         with open(os.path.join(self.dir, "ultimo.txt")) as f:
             self.assertFalse(os.path.exists(f.read().strip()))

@@ -206,6 +206,15 @@ class TestConcurrencia(Base):
 
 
 class TestZonas(Base):
+    def setUp(self):
+        # se comprueba ANTES de super().setUp(): si falta tzdata y saltamos despues, Base.tearDown()
+        # no llega a correr (deja el directorio temporal, la conexion sqlite y rutas.ALMACEN sin restaurar)
+        try:
+            ZoneInfo("Europe/Madrid")
+        except Exception as e:          # falta tzdata (tipico en Windows sin el paquete)
+            self.skipTest(f"falta tzdata para zoneinfo ({e}); instala con: pip install tzdata")
+        super().setUp()
+
     def dias(self, zona, horas_utc):
         self.mete([turno(f"claude:m{i}", t) for i, t in enumerate(horas_utc)])
         self.completa()

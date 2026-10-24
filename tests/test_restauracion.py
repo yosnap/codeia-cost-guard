@@ -93,6 +93,10 @@ class TestRestaurar(Base):
             self.restaura()
         self.assertEqual(claves_de(self.destino), ["claude:vieja"])
 
+    @unittest.skipIf(os.name == "nt", "requiere borrar un -wal con una conexion abierta (con) todo el rato: en Windows la VFS de "
+                      "SQLite no pide FILE_SHARE_DELETE, asi que eso bloquea el borrado (no hay unlink-con-fd-abierto como en "
+                      "POSIX); no se puede cerrar `con` antes porque CIERRA->checkpoint borraria el WAL huerfano que el test "
+                      "necesita crear a mano (verificado: Connection.close() hace checkpoint final aunque wal_autocheckpoint=0)")
     def test_el_wal_de_la_base_antigua_no_resucita(self):
         # la base antigua tiene una fila que SOLO vive en su -wal (la conexión abierta impide el checkpoint)
         viva = base_con(self.destino, ["claude:vieja-checkpoint"], True)
@@ -117,6 +121,10 @@ class TestRestaurar(Base):
         self.assertFalse(os.path.exists(self.destino + "-wal"))
         con.close()
 
+    @unittest.skipIf(os.name == "nt", "lector se mantiene abierto a proposito durante TODA la llamada (no es un bloqueo transitorio "
+                      "que el reintento de _borra_wal pueda esperar): en Windows la VFS de SQLite no pide FILE_SHARE_DELETE, asi que "
+                      "esto bloquea el borrado del -wal sin remedio, ver test_un_lector_transitorio_no_aborta_la_restauracion para "
+                      "el caso equivalente con un lector que SI suelta a tiempo")
     def test_wal_huerfano_con_un_lector_abierto_no_resucita(self):
         # un lector con la lectura abierta impide que el cierre borre el -wal: queda un WAL con filas que no están en la base
         base_con(self.destino, ["claude:vieja"])
@@ -135,12 +143,47 @@ class TestRestaurar(Base):
         lector.close()
         self.assertEqual(claves_de(self.destino), ["claude:nueva-1", "claude:nueva-2"])
 
+    @unittest.skipIf(os.name != "nt", "solo tiene sentido en Windows: en POSIX unlink() nunca falla "
+                      "por tener el fichero abierto, asi que os.remove() de _borra_wal acertaria a la "
+                      "primera, time.sleep no se llamaria nunca, e intentos se quedaria vacio")
+    def test_un_lector_transitorio_no_aborta_la_restauracion(self):
+        # mismo montaje que test_wal_huerfano_con_un_lector_abierto_no_resucita (lector + escritor con
+        # autocheckpoint=0), pero aqui el lector suelta el -wal DURANTE el reintento de _borra_wal
+        # (en su 2a espera, no al final): en Windows debe bastar para no abortar por un bloqueo
+        # transitorio. Se libera desde el propio time.sleep del reintento (no con un reloj real) para
+        # no depender de cuanto tarde el resto de restaurar() en llegar a _borra_wal.
+        base_con(self.destino, ["claude:vieja"])
+        lector = sqlite3.connect(self.destino)
+        lector.execute("PRAGMA journal_mode=WAL")
+        lector.execute("BEGIN")
+        lector.execute("SELECT COUNT(*) FROM turnos").fetchone()
+        escritor = sqlite3.connect(self.destino)
+        escritor.execute("PRAGMA wal_autocheckpoint=0")
+        escritor.execute("INSERT INTO turnos(clave, espacio_id, fuente_id, hora_utc, agente, proveedor, modelo, gi, go, cr, cw, proyecto_raw,"
+                         " productor_version, actualizado_en) SELECT 'claude:SOLO-EN-WAL', espacio_id, fuente_id, hora_utc, agente, proveedor,"
+                         " modelo, gi, go, cr, cw, proyecto_raw, productor_version, actualizado_en FROM turnos LIMIT 1")
+        escritor.commit()
+        escritor.close()
+        intentos = []
+
+        def duerme(_):
+            intentos.append(1)
+            if len(intentos) == 2:
+                lector.close()
+
+        with mock.patch.object(restauracion.time, "sleep", side_effect=duerme):
+            r = self.restaura(forzar=True)
+        self.assertGreaterEqual(len(intentos), 2)          # de verdad reintento, no paso a la primera
+        self.assertTrue(r["sustituyo"])
+        self.assertEqual(claves_de(self.destino), ["claude:nueva-1", "claude:nueva-2"])
+
     def test_guarda_copia_previa_de_la_base_actual(self):
         base_con(self.destino, ["claude:vieja"])
         r = self.restaura(forzar=True)
         self.assertTrue(r["copia_previa"] and os.path.exists(r["copia_previa"]))
         self.assertEqual(claves_de(r["copia_previa"]), ["claude:vieja"])
-        self.assertEqual(oct(os.stat(r["copia_previa"]).st_mode & 0o777), "0o600")
+        if os.name != "nt":                # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(oct(os.stat(r["copia_previa"]).st_mode & 0o777), "0o600")
 
     def test_si_hay_otro_escritor_no_toca_nada(self):
         viva = base_con(self.destino, ["claude:vieja"], True)

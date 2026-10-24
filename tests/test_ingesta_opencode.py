@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -76,6 +77,11 @@ class OpenCodeTest(BaseOC):
         self.inserta("msg_aaaa1111", datos(inp=0, out=0, reas=0, cr=0, cw=0), actualizado=T0 + 10)
         self.pasada()
         self.inserta("msg_aaaa1111", datos(inp=100, out=50), actualizado=T0 + 5000)
+        # mtime claramente futuro: las dos pasadas pueden caer en el mismo tick del reloj de
+        # ficheros (mas grueso en Windows que el tiempo que tarda este test), y sin esto la firma
+        # de la base no cambia y la segunda pasada se sirve de la cache de la primera.
+        futuro = time.time() + 5
+        os.utime(self.ruta, (futuro, futuro))
         r = self.pasada()
         self.assertEqual((r["subidos"], r["nuevos"]), (1, 0))
         self.assertEqual(self.turnos()["opencode:msg_aaaa1111"]["go"], 350)
@@ -87,6 +93,8 @@ class OpenCodeTest(BaseOC):
         with mock.patch.object(ingesta_opencode, "abrir_sqlite_solo_lectura", side_effect=AssertionError("no debía abrirse")):
             self.assertTrue(self.pasada()["sin_cambios"])
         self.inserta("msg_nuevo001", datos(), actualizado=T0 + 99)
+        futuro = time.time() + 5          # mismo motivo que en test_mensaje_en_curso_que_se_completa_despues_sube_los_tokens
+        os.utime(self.ruta, (futuro, futuro))
         r = self.pasada()
         self.assertEqual((r["nuevos"], r["iguales"]), (1, 5))             # releyó el margen de 5 minutos (inocuo) y solo 1 es nuevo
 
@@ -103,6 +111,8 @@ class OpenCodeTest(BaseOC):
         self.inserta("msg_aaaa1111", datos(), actualizado=T0 + 10 * 60000)
         self.pasada()
         self.inserta("msg_tarde001", datos(), actualizado=T0 + 9 * 60000)             # otro proceso lo confirma después, con una marca anterior
+        futuro = time.time() + 5          # mismo motivo que en test_mensaje_en_curso_que_se_completa_despues_sube_los_tokens
+        os.utime(self.ruta, (futuro, futuro))
         self.assertEqual(self.pasada()["nuevos"], 1)
         self.assertEqual(len(self.turnos()), 2)
 
@@ -184,6 +194,8 @@ class OpenCodeTest(BaseOC):
         self.origen.execute("DELETE FROM message")
         self.inserta("msg_aaaa1111", datos(), actualizado=T0 + 5)                     # la marca retrocede: base nueva
         self.inserta("msg_bbbb2222", datos(), actualizado=T0 + 6)
+        futuro = time.time() + 5          # mismo motivo que en test_mensaje_en_curso_que_se_completa_despues_sube_los_tokens
+        os.utime(self.ruta, (futuro, futuro))
         r = self.pasada()
         self.assertEqual((r["nuevos"], r["iguales"]), (1, 1))
 
@@ -240,7 +252,10 @@ class OpenCodeTest(BaseOC):
         self.origen = sqlite3.connect(self.ruta)
 
     def test_ruta_con_caracteres_especiales(self):
-        raro = os.path.join(os.path.dirname(self.ruta), "a#b?c d.db")
+        # "?" es ilegal en nombres de fichero de Windows: se cambia por otro caracter especial valido
+        # alli pero con significado reservado en una URI (igual que "?").
+        nombre = "a#b;c d.db" if os.name == "nt" else "a#b?c d.db"
+        raro = os.path.join(os.path.dirname(self.ruta), nombre)
         shutil.copy(self.ruta, raro)
         self.inserta("msg_aaaa1111", datos())
         shutil.copy(self.ruta, raro)

@@ -379,12 +379,15 @@ class RelojYFicheroTest(Base):
         self.assertTrue(os.path.exists(sa.ruta() + ".corrupto"))
         self.assertTrue(self.estado()["base"])
 
+    @unittest.skipIf(os.name == "nt", "os.mkfifo no existe en Windows")
     def test_un_fifo_en_la_ruta_no_cuelga_nada(self):
         os.mkfifo(sa.ruta())
         self.pasa(disco=50)
         self.assertTrue(os.path.exists(sa.ruta() + ".corrupto"))
         self.assertTrue(self.estado()["base"])
 
+    @unittest.skipIf(os.name == "nt", "os.symlink necesita Modo Desarrollador o admin en Windows, "
+                     "no se puede dar por hecho en la maquina de un usuario")
     def test_un_enlace_simbolico_no_se_sigue(self):
         destino = os.path.join(self.dir, "otro.json")
         with open(destino, "w") as f:

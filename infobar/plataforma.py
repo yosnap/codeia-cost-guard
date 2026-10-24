@@ -98,6 +98,60 @@ def avisar(titulo, texto):
 
 # ---------------------------------------------------------------- procesos y cerrojos portables
 
+def resuelve_programa(orden):
+    """`orden` con el programa (primer elemento) resuelto a su ruta completa, buscando a mano SOLO en los
+    directorios absolutos del PATH (nunca en el directorio de trabajo actual, y nunca `.cmd`/`.bat`):
+
+    - En Windows, lanzar un nombre pelado (sin ruta) con subprocess solo encuentra `.exe` (nunca un
+      fichero sin extensión, aunque exista antes en el PATH) — de ahi que haga falta resolver la ruta
+      a mano. NO se usa `shutil.which()` para esto: desde Python 3.12, en Windows, consulta el
+      directorio de trabajo actual ANTES que el PATH (salvo que el proceso tenga puesta la variable
+      `NoDefaultCurrentDirectoryInExePath`, que una sesion normal no tiene) — cualquiera que deje un
+      "ssh.exe"/"ssh.cmd" en el directorio desde el que se arranque esta app lo suplantaria. Tampoco se
+      acepta `.cmd`/`.bat`: pasandoles un comando remoto con `&&`/`|` dentro (como el diagnostico que
+      ssh manda al servidor) subprocess los lanza a traves de cmd.exe, que reinterpreta esos caracteres
+      como sintaxis propia y rompe el argumento entero (sintoma real visto: una palabra cualquiera del
+      script remoto tratada como orden nueva, `"x" no se reconoce como un comando...`).
+    - En POSIX no cambia nada (el propio `os.access(..., os.X_OK)` es lo que ya hacia el kernel al
+      lanzar el nombre pelado).
+
+    Para sustituir el programa por uno de pega en los tests (ssh/ssh-keygen/ssh-keyscan de pega): la
+    variable `COSTGUARD_FAKES_DIR`, que SOLO pone `tests/test_servidores_alta.py`, nunca produccion.
+    Si esta puesta y hay un "<nombre>.py" ahi, se lanza con el interprete actual — nunca se escanea el
+    PATH buscando ese `.py` (evita que cualquiera que pueda escribir en el PATH, no solo los tests,
+    pueda plantar uno).
+
+    Si no se encuentra en ningun directorio del PATH, en Windows se lanza FileNotFoundError en vez de
+    devolver `orden` sin tocar: dejar que subprocess intente el nombre pelado reabriria la misma
+    puerta del directorio de trabajo actual (CreateProcess lo mira si no encuentra nada en el PATH).
+    Los 3 sitios que llaman a esto ya atrapan OSError/Exception al lanzar, asi que no cambia como se
+    ve el fallo desde fuera. En POSIX no hace falta: el kernel no mira el directorio de trabajo actual
+    al lanzar un nombre pelado salvo que este literalmente en el PATH (y eso ya esta descartado arriba).
+
+    Si `orden[0]` ya trae un componente de ruta (absoluta o relativa, como lo que usan algunos tests
+    para simular ssh con `sys.executable`), no hay nada que resolver por PATH — se devuelve tal cual,
+    igual que ya hacen subprocess/exec con cualquier nombre que no sea pelado."""
+    nombre = orden[0]
+    if os.path.dirname(nombre):
+        return orden
+    fakes = os.environ.get("COSTGUARD_FAKES_DIR")
+    if fakes:
+        candidato = os.path.join(fakes, nombre + ".py")
+        if os.path.isfile(candidato):
+            return [sys.executable, candidato, *orden[1:]]
+    extensiones = (".exe", ".com") if os.name == "nt" else ("",)
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d or not os.path.isabs(d):           # vacio o relativo: nunca el directorio de trabajo actual
+            continue
+        for ext in extensiones:
+            candidato = os.path.join(d, nombre + ext)
+            if os.path.isfile(candidato) and (os.name == "nt" or os.access(candidato, os.X_OK)):
+                return [candidato, *orden[1:]]
+    if os.name == "nt":
+        raise FileNotFoundError(f"no se encontro {nombre!r} en el PATH")
+    return orden
+
+
 def sin_ventana_kwargs():
     """Argumentos de subprocess para que un programa de consola (ssh, taskkill) no abra su propia ventana en Windows: la bandeja
     corre con pythonw.exe, sin consola, y cada hijo sin esta marca haría parpadear una ventana negra en cada ciclo."""

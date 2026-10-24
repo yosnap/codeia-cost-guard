@@ -97,7 +97,7 @@ def medir_web(url):
 def host_de_ssh(destino, puerto=22):
     """Host real (y puerto) de usuario@host o de un alias de ~/.ssh/config, via `ssh -G`."""
     try:
-        r = subprocess.run(["ssh", "-G", "-p", str(puerto), "--", destino], capture_output=True,
+        r = subprocess.run(plataforma.resuelve_programa(["ssh", "-G", "-p", str(puerto), "--", destino]), capture_output=True,
                            text=True, timeout=5, **plataforma.sin_ventana_kwargs())
         cfg = dict(l.split(" ", 1) for l in r.stdout.splitlines() if " " in l)
         return cfg.get("hostname") or destino.split("@")[-1]

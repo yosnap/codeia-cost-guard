@@ -12,7 +12,7 @@ cosas a localhost. Por eso:
     otro proceso del Mac. La barra abre el panel con un ticket de un solo uso (en memoria, 60 s) que el servidor
     cambia por una cookie HttpOnly SameSite=Strict; sin la cookie, nada responde. El ticket no toca el disco.
 """
-import hmac, json, os, secrets, socket, subprocess, sys, threading, time
+import hmac, json, os, secrets, socket, subprocess, sys, threading, time, webbrowser
 
 from urllib.parse import parse_qs, urlsplit
 
@@ -313,6 +313,16 @@ def crear_servidor(puerto=PUERTO):
                     self._manda(200, html, "text/html; charset=utf-8", csp=csp)
                 except Exception as e:
                     self._manda(500, str(e).encode(), "text/plain")
+            elif ruta == "/navegador":
+                # el navegador del sistema no comparte cookies con esta ventana (ni con la de otro SO):
+                # se le abre SU PROPIO ticket de un solo uso, igual que hace el icono de la bandeja
+                try:
+                    puerto = self.server.server_address[1]
+                    t = nuevo_ticket(self.server)
+                    webbrowser.open(f"http://127.0.0.1:{puerto}/entrar?t={t}")
+                    self._json(200, {"ok": True})
+                except Exception as e:
+                    self._json(500, {"ok": False, "error": str(e)[:200]})
             elif ruta == "/guia":
                 try:
                     with open(f"{base}/GUIA.md", encoding="utf-8") as f:

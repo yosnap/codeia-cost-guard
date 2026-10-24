@@ -133,6 +133,9 @@ class TestRevision(Base):
         self.assertEqual(r["fallos"], 1)
         self.assertFalse(self.n_turnos()[1])
 
+    @unittest.skipIf(os.name == "nt", "el test borra el fichero sqlite mientras self.ing mantiene su conexión abierta (\"la barra en "
+                     "marcha\"); en Windows la VFS de SQLite no pide FILE_SHARE_DELETE, así que no se puede borrar un fichero con una "
+                     "conexión todavía abierta (en POSIX sí, por eso el escenario solo es reproducible ahí)")
     def test_base_borrada_con_la_barra_en_marcha_se_recrea(self):
         self.fichero("a.jsonl", [linea("msg_01AAAAAAAAAAAAAAAA")])
         self.ing.vuelta()

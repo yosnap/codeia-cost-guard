@@ -42,8 +42,9 @@ class TestOrigen(Base):
         ruta, estado = exportacion.copiar_base(con)
         try:
             self.assertEqual(estado, "ok")
-            self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
-            self.assertEqual(stat.S_IMODE(os.stat(os.path.dirname(ruta)).st_mode), 0o700)
+            if os.name != "nt":                # NTFS no tiene bits de permiso POSIX
+                self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(os.stat(os.path.dirname(ruta)).st_mode), 0o700)
             self.assertFalse(os.path.exists(ruta + "-wal"))
             c = sqlite3.connect(ruta)
             self.assertEqual(c.execute("PRAGMA journal_mode").fetchone()[0], "delete")

@@ -154,8 +154,8 @@ def _ejecuta(orden, entrada=None, tope=30):
     """(código, salida, error) de un programa, con tope de tiempo y de tamaño. Nunca lanza: un fallo de ejecución es código None."""
     try:
         # sin entrada, stdin es /dev/null: ssh no hereda (ni se queda leyendo) el stdin del proceso que lanza el alta
-        r = subprocess.run(orden, input=entrada, stdin=subprocess.DEVNULL if entrada is None else None, capture_output=True, timeout=tope,
-                           **plataforma.sin_ventana_kwargs())
+        r = subprocess.run(plataforma.resuelve_programa(orden), input=entrada, stdin=subprocess.DEVNULL if entrada is None else None,
+                           capture_output=True, timeout=tope, **plataforma.sin_ventana_kwargs())
     except subprocess.TimeoutExpired:
         return None, b"", b"timeout"
     except OSError as e:

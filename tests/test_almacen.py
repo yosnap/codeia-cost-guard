@@ -236,11 +236,16 @@ class EscritorUnicoTest(Base):
         lector.close()
 
 
+@unittest.skipIf(os.name == "nt", "detecta el 'noowners' del mount de macOS con rutas /Volumes/... "
+                  "estilo macOS: os.path.realpath (ntpath) las resuelve de otra forma en Windows")
 class VolumenTest(unittest.TestCase):
     SALIDA = ("/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n"
               "/dev/disk4s1 on /Volumes/EVO990 (apfs, local, nodev, nosuid, journaled, noowners)\n"
               "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, protect)\n")
 
+    @unittest.skipIf(os.name == "nt", "os.path.realpath() de una ruta estilo POSIX se reescribe con la "
+                     "unidad actual en Windows (no coincide con los puntos de montaje de SALIDA); la "
+                     "funcion ya esta documentada y gateada como exclusiva de macOS (noowners)")
     def test_externo_sin_propietarios(self):
         self.assertTrue(plataforma.volumen_sin_propietarios("/Volumes/EVO990/x/consumo.sqlite", self.SALIDA))
 
@@ -290,13 +295,17 @@ class HallazgosRevisionTest(Base):
         self.assertEqual(self.horas_reales(), self.horas_esperadas())
 
     def test_ruta_de_solo_lectura_con_caracteres_especiales(self):
-        for nombre in ("a#b.sqlite", "a?b=c.sqlite", "a b%20c.sqlite"):
+        # "?" es un caracter reservado/ilegal en nombres de fichero de Windows (junto con < > : " / \ |):
+        # no se puede crear ese fichero ahi, asi que en Windows se cambia por otro caracter especial
+        # valido alli pero que tambien tiene significado reservado en una URI (igual que "?").
+        segundo = "a?b=c.sqlite" if os.name != "nt" else "a;b=c.sqlite"
+        for nombre in ("a#b.sqlite", segundo, "a b%20c.sqlite"):
             ruta = os.path.join(self.dir, nombre)
             almacen.abrir(ruta).close()
             con = almacen.abrir(ruta, solo_lectura=True)
             self.assertEqual(con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='turnos'").fetchone()[0], 1, nombre)
             con.close()
-        self.assertEqual(sorted(f for f in os.listdir(self.dir) if f.endswith(".sqlite")), ["a b%20c.sqlite", "a#b.sqlite", "a?b=c.sqlite"])
+        self.assertEqual(sorted(f for f in os.listdir(self.dir) if f.endswith(".sqlite")), sorted(["a b%20c.sqlite", "a#b.sqlite", segundo]))
 
     def test_solo_lectura_es_mode_ro_aunque_se_quite_query_only(self):
         con = almacen.abrir(self.ruta, solo_lectura=True)
@@ -447,11 +456,14 @@ class PlataformaTest(unittest.TestCase):
     def test_directorio_de_datos_por_sistema(self):
         with mock.patch.dict(os.environ, {"COSTGUARD_DATOS": ""}):
             os.environ.pop("COSTGUARD_DATOS")
+            # .replace("\\", "/"): mockear os.name/sys.platform cambia las ramas del propio
+            # codigo, pero no a que modulo esta ligado os.path (ntpath en Windows): os.path.join
+            # sigue uniendo con "\" aunque la rama activa sea la de macOS/Linux.
             with mock.patch.object(plataforma.sys, "platform", "darwin"), mock.patch.object(plataforma.os, "name", "posix"):
-                self.assertTrue(plataforma.dir_datos().endswith("Library/Application Support/CostGuard"))
+                self.assertTrue(plataforma.dir_datos().replace("\\", "/").endswith("Library/Application Support/CostGuard"))
             with mock.patch.object(plataforma.sys, "platform", "linux"), mock.patch.object(plataforma.os, "name", "posix"), \
                     mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/xdg"}):
-                self.assertEqual(plataforma.dir_datos(), "/xdg/costguard")
+                self.assertEqual(plataforma.dir_datos().replace("\\", "/"), "/xdg/costguard")
             with mock.patch.object(plataforma.os, "name", "nt"), mock.patch.dict(os.environ, {"LOCALAPPDATA": "C:/L"}):
                 self.assertTrue(plataforma.dir_datos().replace("\\", "/").endswith("L/CostGuard"))
 

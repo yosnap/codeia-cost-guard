@@ -3,6 +3,7 @@ procesos, exclusión de copias del sistema, poda de IPs de la caché, purga hora
 import ast
 import glob
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -74,8 +75,10 @@ class TestProcesos(unittest.TestCase):
     def test_argumentos_de_grupo_segun_el_sistema(self):
         with mock.patch.object(plataforma.os, "name", "posix"):
             self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"start_new_session": True})
-        with mock.patch.object(plataforma.os, "name", "nt"), mock.patch.object(plataforma.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
-            self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"creationflags": 512})
+        with mock.patch.object(plataforma.os, "name", "nt"), \
+             mock.patch.object(plataforma.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), \
+             mock.patch.object(plataforma.subprocess, "CREATE_NO_WINDOW", 0x8000000, create=True):
+            self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"creationflags": 512 | 0x8000000})
 
     def test_en_windows_se_usa_taskkill_con_arbol(self):
         falso = mock.Mock(pid=4242)
@@ -331,6 +334,91 @@ class ProcesosSinVentanaTest(unittest.TestCase):
         for rel in ("infobar/servidores_externo.py", "infobar/servidores_alta.py"):
             with open(os.path.join(RAIZ, rel), encoding="utf-8") as f:
                 self.assertIn("sin_ventana_kwargs()", f.read(), rel)
+
+
+class ResuelveProgramaTest(unittest.TestCase):
+    """plataforma.resuelve_programa(): nunca el directorio de trabajo actual, nunca .cmd/.bat (cmd.exe
+    reparsearia mal un argumento con caracteres especiales), y el .py de pega solo si COSTGUARD_FAKES_DIR
+    lo apunta explicitamente - nunca escaneando el PATH, ni siquiera en los tests."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="cg-resuelve-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self._cwd = os.getcwd()
+        self.addCleanup(os.chdir, self._cwd)
+        self._path = os.environ.get("PATH", "")
+        self.addCleanup(os.environ.__setitem__, "PATH", self._path)
+        self.addCleanup(os.environ.pop, "COSTGUARD_FAKES_DIR", None)
+        os.environ.pop("COSTGUARD_FAKES_DIR", None)
+        # sin esto, si el proceso ya la tuviera puesta, test_el_directorio_de_trabajo_actual_no_se_consulta
+        # pasaria igual con shutil.which (el codigo viejo) y no probaria nada
+        nodefault = os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)
+        if nodefault is None:
+            self.addCleanup(os.environ.pop, "NoDefaultCurrentDirectoryInExePath", None)
+        else:
+            self.addCleanup(os.environ.__setitem__, "NoDefaultCurrentDirectoryInExePath", nodefault)
+
+    def _toca(self, *partes):
+        ruta = os.path.join(self.dir, *partes)
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        open(ruta, "w").close()
+        return ruta
+
+    def test_un_programa_que_ya_trae_ruta_no_se_toca(self):
+        # algunos tests pasan sys.executable (ruta absoluta) en vez de "ssh" para simular el servidor
+        # con un proceso controlable; no hay nada que resolver por PATH ahi, debe devolverse tal cual
+        os.environ["PATH"] = ""                        # ni siquiera estar vacio debe importar
+        self.assertEqual(plataforma.resuelve_programa([sys.executable, "-c", "1"]), [sys.executable, "-c", "1"])
+        relativo = os.path.join("subdir", "programa")  # con componente de ruta aunque sea relativa
+        self.assertEqual(plataforma.resuelve_programa([relativo]), [relativo])
+
+    def _asegura_no_encontrado(self, orden):
+        # en Windows, no encontrarlo en ningun PATH lanza (ver resuelve_programa); dejarlo pasar sin
+        # tocar reabriria la misma puerta del directorio de trabajo actual via el CreateProcess de
+        # subprocess. En POSIX no hace falta: el kernel no mira el directorio de trabajo actual al
+        # lanzar un nombre pelado salvo que este literalmente en el PATH
+        if os.name == "nt":
+            with self.assertRaises(FileNotFoundError):
+                plataforma.resuelve_programa(orden)
+        else:
+            self.assertEqual(plataforma.resuelve_programa(orden), orden)
+
+    @unittest.skipIf(os.name != "nt", "shutil.which consultando antes el directorio de trabajo actual es un "
+                      "comportamiento especifico de Windows (Python 3.12+); no aplica en POSIX")
+    def test_el_directorio_de_trabajo_actual_no_se_consulta(self):
+        trampa, real_dir = os.path.join(self.dir, "trampa"), os.path.join(self.dir, "real")
+        self._toca("trampa", "programa.exe")
+        ruta_real = self._toca("real", "programa.exe")
+        os.chdir(trampa)
+        os.environ["PATH"] = real_dir
+        self.assertEqual(plataforma.resuelve_programa(["programa", "-x"]), [ruta_real, "-x"])
+
+    @unittest.skipIf(os.name != "nt", "cmd/bat solo existen en Windows")
+    def test_nunca_resuelve_a_cmd_o_bat(self):
+        self._toca("bin", "programa.cmd")
+        os.environ["PATH"] = os.path.join(self.dir, "bin")
+        self._asegura_no_encontrado(["programa", "-x"])   # nada que valga (.cmd no cuenta): no se encuentra
+
+    def test_entradas_de_path_vacias_o_relativas_se_ignoran(self):
+        ruta_real = self._toca("bin", "programa" + (".exe" if os.name == "nt" else ""))
+        if os.name != "nt":
+            os.chmod(ruta_real, 0o755)
+        os.environ["PATH"] = os.pathsep.join(("", ".", os.path.join(self.dir, "bin")))
+        self.assertEqual(plataforma.resuelve_programa(["programa"]), [ruta_real])
+
+    def test_el_py_de_pega_solo_se_usa_si_costguard_fakes_dir_lo_apunta(self):
+        fakes = os.path.join(self.dir, "fakes")
+        self._toca("fakes", "programa.py")
+        os.environ["PATH"] = ""
+        self._asegura_no_encontrado(["programa"])         # sin la variable: no se usa, y no hay nada mas
+        os.environ["COSTGUARD_FAKES_DIR"] = fakes
+        self.assertEqual(plataforma.resuelve_programa(["programa", "-x"]),
+                         [sys.executable, os.path.join(fakes, "programa.py"), "-x"])
+
+    def test_el_py_de_pega_nunca_se_busca_escaneando_el_path(self):
+        self._toca("bin", "programa.py")                 # un .py suelto en el PATH (no via COSTGUARD_FAKES_DIR)
+        os.environ["PATH"] = os.path.join(self.dir, "bin")
+        self._asegura_no_encontrado(["programa"])         # nunca se mira: no se encuentra
 
 
 class PuertoExclusivoTest(unittest.TestCase):

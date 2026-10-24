@@ -7,6 +7,7 @@ import http.client
 import io
 import json
 import os
+import shlex
 import struct
 import sys
 import threading
@@ -183,7 +184,8 @@ class AltaConClaveTest(ConClaves):
         self.assertEqual((r["estado"], r["codigo"]), ("error", "terminal_auth"))
         self.assertEqual(r["autorizar"], {"linea": claves_ssh.linea_autorizar(ED + " trabajo"), "fichero": "trabajo.pub"})
         ruta = os.path.join(self.ssh_dir, "trabajo")
-        self.assertEqual(r["linea_terminal"], f"bash {os.path.join(alta.REMOTO, 'alta-servidor.sh')} -i {ruta} --nombre 'mi web' root@srv.example.com")
+        self.assertEqual(r["linea_terminal"], f"bash {shlex.quote(os.path.join(alta.REMOTO, 'alta-servidor.sh'))} -i {shlex.quote(ruta)} "
+                         f"--nombre {shlex.quote('mi web')} root@srv.example.com")
 
     def test_sin_clave_personal_se_dice_y_no_hay_linea(self):
         self.fake({"conocida": True, "sin_auth": True})
